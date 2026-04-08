@@ -83,9 +83,11 @@ Create a `.env` file at the project root:
 
 ```
 GMAIL_CLIENT_ID=123456789012-abcdefghijklmnopqrstuvwxyzabcd.apps.googleusercontent.com
+EXTENSION_KEY=your_optional_extension_key_here
 ```
 
 > This file is in `.gitignore` — it will never be committed.
+> Note: `EXTENSION_KEY` is optional but recommended to keep your Chrome Extension ID stable across machines. You can find it in the `manifest.json` after packing the extension once in Chrome.
 
 ---
 

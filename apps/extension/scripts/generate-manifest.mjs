@@ -14,10 +14,13 @@ if (!clientId) {
   console.warn('Warning: GMAIL_CLIENT_ID is not set in .env — OAuth will not work.');
 }
 
+const extensionKey = process.env['EXTENSION_KEY'];
+
 const manifest = {
   manifest_version: 3,
   name: 'Inbox Zen',
   version: pkg.version,
+  ...(extensionKey && { key: extensionKey }),
   description: 'An AI assistant for Gmail',
   permissions: ['storage', 'identity'],
   host_permissions: [
