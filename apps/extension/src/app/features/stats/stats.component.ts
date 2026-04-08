@@ -73,7 +73,7 @@ type Tab = 'unread' | 'heaviest';
                 </div>
               </div>
             } @else {
-              <p class="stats__loading-text">Fetching emails…</p>
+              <p class="stats__loading-text">Fetching unread emails…</p>
             }
           </div>
         } @else if (error()) {
