@@ -1,46 +1,44 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 
-# compiled output
-dist
-tmp
-out-tsc
-
-# dependencies
-node_modules
-
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-
-# IDE - VSCode
-.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
 !.vscode/settings.json
 !.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-# misc
+.c9/
+.classpath
+.claude
+.DS_Store
+.gemini
+.nx/cache
+.nx/workspace-data
+.project
+.settings/
+.vscode/*
+*.launch
+*.sublime-workspace
+/.idea
 /.sass-cache
 /connect.lock
 /coverage
 /libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
 /typings
-GEMINI.md
-.gemini
-CLAUDE.md
-.claude
-
+# compiled output
+# dependencies
+# IDE - VSCode
+# IDEs and editors
+# misc
+# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 # System Files
-.DS_Store
+CLAUDE.md
+dist
+GEMINI.md
+node_modules
+npm-debug.log
+out-tsc
+testem.log
 Thumbs.db
+tmp
+tmp/
+yarn-error.log
 
-.nx/cache
-.nx/workspace-data
+# Environment variables
+.env

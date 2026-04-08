@@ -1,16 +1,30 @@
 {
-  "name": "gmail-assistant",
+  "name": "inbox-zen",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "start": "nx serve extension",
+    "build": "nx build extension",
+    "test": "nx test extension",
+    "lint": "nx lint extension"
+  },
   "private": true,
-  "dependencies": {},
   "devDependencies": {
+    "@eslint/js": "^9.8.0",
+    "@nx/angular": "^22.5.4",
+    "@nx/eslint": "^22.5.4",
+    "@nx/eslint-plugin": "22.5.4",
     "@nx/js": "22.5.4",
-    "nx": "22.5.4"
+    "@typescript-eslint/utils": "^8.40.0",
+    "angular-eslint": "^21.0.1",
+    "eslint": "^9.8.0",
+    "eslint-config-prettier": "^10.0.0",
+    "nx": "22.5.4",
+    "typescript-eslint": "^8.40.0"
   },
   "workspaces": [
     "apps/*",
     "libs/*"
-  ]
+  ],
+  "dependencies": {}
 }
