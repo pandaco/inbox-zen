@@ -3,7 +3,13 @@ export type MessageType =
   | 'LOGOUT'
   | 'GET_AUTH_STATUS'
   | 'GET_TOP_UNREAD_SENDERS'
-  | 'GET_TOP_HEAVIEST_EMAILS';
+  | 'GET_TOP_HEAVIEST_EMAILS'
+  | 'GET_TOP_REPEATED_SUBJECTS';
+
+export interface SubjectStat {
+  subject: string;
+  count: number;
+}
 
 export interface BgMessage {
   type: MessageType;

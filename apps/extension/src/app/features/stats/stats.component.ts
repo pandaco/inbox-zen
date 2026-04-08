@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, effect, inject, signal, computed, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { StatsService, SenderStat, SizeStat } from './stats.service';
+import { StatsService, SenderStat, SizeStat, SubjectStat } from './stats.service';
 import { GmailSearchService } from '../../core/gmail-search/gmail-search.service';
 
 function formatSize(bytes: number): string {
@@ -20,7 +20,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-type Tab = 'unread' | 'heaviest';
+type Tab = 'unread' | 'heaviest' | 'repeated';
 
 @Component({
   selector: 'app-stats',
@@ -43,6 +43,10 @@ type Tab = 'unread' | 'heaviest';
         <button role="tab" [attr.aria-selected]="activeTab() === 'unread'"
           [class.active]="activeTab() === 'unread'" (click)="setTab('unread')">
           Unread
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'repeated'"
+          [class.active]="activeTab() === 'repeated'" (click)="setTab('repeated')">
+          Repeated
         </button>
         <button role="tab" [attr.aria-selected]="activeTab() === 'heaviest'"
           [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
@@ -103,6 +107,35 @@ type Tab = 'unread' | 'heaviest';
                       <div class="chart__bar"
                         [style.width.%]="(item.count / sendersMax()) * 100"
                         [attr.aria-label]="item.count + ' unread emails'">
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              }
+            </ol>
+          }
+        } @else if (activeTab() === 'repeated') {
+          @if (repeated().length === 0) {
+            <p class="stats__empty">No repeated subjects found.</p>
+          } @else {
+            <ol class="chart" aria-label="Top subjects by repetition count">
+              @for (item of visibleRepeated(); track item.subject; let i = $index) {
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchRepeated(item)"
+                    (keydown.enter)="searchRepeated(item)"
+                    (keydown.space)="searchRepeated(item)"
+                    [title]="'Search: ' + item.subject">
+                  <span class="chart__rank">{{ i + 1 }}</span>
+                  <div class="chart__info">
+                    <div class="chart__label-row">
+                      <span class="chart__name">{{ item.subject }}</span>
+                      <span class="chart__value">{{ item.count }}</span>
+                    </div>
+                    <div class="chart__bar-bg" role="presentation">
+                      <div class="chart__bar chart__bar--purple"
+                        [style.width.%]="(item.count / repeatedMax()) * 100"
+                        [attr.aria-label]="item.count + ' occurrences'">
                       </div>
                     </div>
                   </div>
@@ -313,6 +346,7 @@ type Tab = 'unread' | 'heaviest';
     }
 
     .chart__bar--orange { background: #fa7b17; }
+    .chart__bar--purple { background: #a142f4; }
 
     .stats__footer {
       padding: 0.8rem 1.2rem;
@@ -358,36 +392,53 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly error = signal<string | null>(null);
   protected readonly senders = signal<SenderStat[]>([]);
   protected readonly heaviest = signal<SizeStat[]>([]);
+  protected readonly repeated = signal<SubjectStat[]>([]);
   protected readonly unreadFetched = signal(0);
   protected readonly unreadErrors = signal(0);
   protected readonly heaviestFetched = signal(0);
   protected readonly heaviestErrors = signal(0);
+  protected readonly repeatedFetched = signal(0);
+  protected readonly repeatedErrors = signal(0);
   protected readonly loadFetched = signal(0);
   protected readonly loadTotal = signal(0);
   protected readonly displayCount = signal(this.PAGE_SIZE);
   protected readonly unreadCachedAt = signal<number | null>(null);
   protected readonly heaviestCachedAt = signal<number | null>(null);
+  protected readonly repeatedCachedAt = signal<number | null>(null);
 
-  protected readonly totalFetched = computed(() =>
-    this.activeTab() === 'unread' ? this.unreadFetched() : this.heaviestFetched(),
-  );
-  protected readonly errorCount = computed(() =>
-    this.activeTab() === 'unread' ? this.unreadErrors() : this.heaviestErrors(),
-  );
+  protected readonly totalFetched = computed(() => {
+    const tab = this.activeTab();
+    if (tab === 'unread') return this.unreadFetched();
+    if (tab === 'repeated') return this.repeatedFetched();
+    return this.heaviestFetched();
+  });
+  protected readonly errorCount = computed(() => {
+    const tab = this.activeTab();
+    if (tab === 'unread') return this.unreadErrors();
+    if (tab === 'repeated') return this.repeatedErrors();
+    return this.heaviestErrors();
+  });
   protected readonly visibleSenders = computed(() =>
     this.senders().slice(0, this.displayCount()),
   );
   protected readonly visibleHeaviest = computed(() =>
     this.heaviest().slice(0, this.displayCount()),
   );
-  protected readonly hasMore = computed(() =>
-    this.activeTab() === 'unread'
-      ? this.senders().length > this.displayCount()
-      : this.heaviest().length > this.displayCount(),
+  protected readonly visibleRepeated = computed(() =>
+    this.repeated().slice(0, this.displayCount()),
   );
-  protected readonly activeCachedAt = computed(() =>
-    this.activeTab() === 'unread' ? this.unreadCachedAt() : this.heaviestCachedAt(),
-  );
+  protected readonly hasMore = computed(() => {
+    const tab = this.activeTab();
+    if (tab === 'unread') return this.senders().length > this.displayCount();
+    if (tab === 'repeated') return this.repeated().length > this.displayCount();
+    return this.heaviest().length > this.displayCount();
+  });
+  protected readonly activeCachedAt = computed(() => {
+    const tab = this.activeTab();
+    if (tab === 'unread') return this.unreadCachedAt();
+    if (tab === 'repeated') return this.repeatedCachedAt();
+    return this.heaviestCachedAt();
+  });
   // true when data came from cache (not a live fetch just performed)
   protected readonly isFromCache = computed(() => {
     const ts = this.activeCachedAt();
@@ -400,6 +451,9 @@ export class StatsComponent implements OnInit, OnDestroy {
   );
   protected readonly heaviestMax = computed(() =>
     Math.max(1, ...this.heaviest().map((h) => h.sizeEstimate)),
+  );
+  protected readonly repeatedMax = computed(() =>
+    Math.max(1, ...this.repeated().map((s) => s.count)),
   );
 
   protected readonly formatSize = formatSize;
@@ -444,6 +498,10 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.gmailSearch.search(`from:${item.from} larger:${Math.round(item.sizeEstimate * 0.9)}`);
   }
 
+  protected searchRepeated(item: SubjectStat): void {
+    this.gmailSearch.search(`subject:"${item.subject}"`);
+  }
+
   protected load(forceRefresh = false): void {
     this.isLoading.set(true);
     this.error.set(null);
@@ -451,18 +509,21 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.unreadErrors.set(0);
     this.heaviestFetched.set(0);
     this.heaviestErrors.set(0);
+    this.repeatedFetched.set(0);
+    this.repeatedErrors.set(0);
     this.loadFetched.set(0);
     this.loadTotal.set(0);
     this.displayCount.set(this.PAGE_SIZE);
     if (forceRefresh) {
       this.unreadCachedAt.set(null);
       this.heaviestCachedAt.set(null);
+      this.repeatedCachedAt.set(null);
     }
 
     let done = 0;
 
     const checkDone = (err?: string): void => {
-      if (++done < 2) return;
+      if (++done < 3) return;
       this.isLoading.set(false);
       if (err) this.error.set(err);
     };
@@ -504,6 +565,24 @@ export class StatsComponent implements OnInit, OnDestroy {
             this.heaviestFetched.set(msg.data.totalFetched);
             this.heaviestErrors.set(msg.data.errorCount);
             this.heaviestCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+
+    this.statsService.streamRepeatedSubjects(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.repeated.set(msg.data.items);
+            this.repeatedFetched.set(msg.data.totalFetched);
+            this.repeatedErrors.set(msg.data.errorCount);
+            this.repeatedCachedAt.set(msg.cachedAt ?? Date.now());
             checkDone();
           }
         }

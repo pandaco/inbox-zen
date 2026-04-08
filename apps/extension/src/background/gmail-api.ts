@@ -1,6 +1,6 @@
-import type { SenderStat, SizeStat, StatsResult } from '../shared/types';
+import type { SenderStat, SizeStat, SubjectStat, StatsResult } from '../shared/types';
 
-export type { SenderStat, SizeStat, StatsResult };
+export type { SenderStat, SizeStat, SubjectStat, StatsResult };
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const BATCH_API = 'https://www.googleapis.com/batch/gmail/v1';
@@ -214,6 +214,27 @@ export async function getTopHeaviestEmails(
       sizeEstimate: msg.sizeEstimate,
     }))
     .sort((a, b) => b.sizeEstimate - a.sizeEstimate);
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function getTopRepeatedSubjects(
+  token: string,
+  onProgress?: ProgressCallback,
+): Promise<StatsResult<SubjectStat>> {
+  const ids = await listAllMessageIds(token, 'is:unread');
+  onProgress?.(0, ids.length);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject'], onProgress);
+
+  const counts = new Map<string, number>();
+  for (const msg of messages) {
+    const subject = getHeader(msg, 'Subject') || '(no subject)';
+    counts.set(subject, (counts.get(subject) || 0) + 1);
+  }
+
+  const items = [...counts.entries()]
+    .map(([subject, count]) => ({ subject, count }))
+    .sort((a, b) => b.count - a.count);
 
   return { items, totalFetched: messages.length, errorCount };
 }

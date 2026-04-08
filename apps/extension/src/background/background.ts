@@ -1,5 +1,5 @@
-import { getTopUnreadSenders, getTopHeaviestEmails } from './gmail-api';
-import type { BgMessage, BgResponse, PortMessage, StatsResult, SenderStat, SizeStat } from '../shared/types';
+import { getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects } from './gmail-api';
+import type { BgMessage, BgResponse, PortMessage, StatsResult, SenderStat, SizeStat, SubjectStat } from '../shared/types';
 
 export type { BgMessage, BgResponse };
 export type { MessageType } from '../shared/types';
@@ -13,6 +13,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const CACHE_KEYS = {
   GET_TOP_UNREAD_SENDERS: 'cache_unread_senders',
   GET_TOP_HEAVIEST_EMAILS: 'cache_heaviest_emails',
+  GET_TOP_REPEATED_SUBJECTS: 'cache_repeated_subjects',
 } as const;
 
 type CachedPortName = keyof typeof CACHE_KEYS;
@@ -148,7 +149,11 @@ chrome.runtime.onConnect.addListener((port) => {
   const [baseName, flag] = port.name.split(':') as [string, string | undefined];
   const forceRefresh = flag === 'refresh';
 
-  if (baseName !== 'GET_TOP_UNREAD_SENDERS' && baseName !== 'GET_TOP_HEAVIEST_EMAILS') return;
+  if (
+    baseName !== 'GET_TOP_UNREAD_SENDERS' &&
+    baseName !== 'GET_TOP_HEAVIEST_EMAILS' &&
+    baseName !== 'GET_TOP_REPEATED_SUBJECTS'
+  ) return;
 
   const portName = baseName as CachedPortName;
   const cacheKey = CACHE_KEYS[portName];
@@ -164,9 +169,11 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     if (!forceRefresh) {
-      const cached = portName === 'GET_TOP_UNREAD_SENDERS'
-        ? await getCached<SenderStat>(cacheKey)
-        : await getCached<SizeStat>(cacheKey);
+      const cached =
+        portName === 'GET_TOP_UNREAD_SENDERS' ? await getCached<SenderStat>(cacheKey) :
+        portName === 'GET_TOP_HEAVIEST_EMAILS' ? await getCached<SizeStat>(cacheKey) :
+        await getCached<SubjectStat>(cacheKey);
+
       if (cached) {
         send({ type: 'RESULT', success: true, data: cached.result, cachedAt: cached.cachedAt });
         return;
@@ -176,10 +183,10 @@ chrome.runtime.onConnect.addListener((port) => {
     const onProgress = (fetched: number, total: number): void =>
       send({ type: 'PROGRESS', fetched, total });
 
-    const promise: Promise<StatsResult<SenderStat> | StatsResult<SizeStat>> =
-      portName === 'GET_TOP_UNREAD_SENDERS'
-        ? getTopUnreadSenders(token, onProgress)
-        : getTopHeaviestEmails(token, onProgress);
+    const promise: Promise<StatsResult<SenderStat> | StatsResult<SizeStat> | StatsResult<SubjectStat>> =
+      portName === 'GET_TOP_UNREAD_SENDERS' ? getTopUnreadSenders(token, onProgress) :
+      portName === 'GET_TOP_HEAVIEST_EMAILS' ? getTopHeaviestEmails(token, onProgress) :
+      getTopRepeatedSubjects(token, onProgress);
 
     promise
       .then(async data => {
