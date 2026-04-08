@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/workers",
+    "types": ["chrome"],
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "src/background/**/*.ts",
+    "src/content-script/**/*.ts"
+  ]
+}

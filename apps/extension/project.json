@@ -1,12 +1,12 @@
 {
   "name": "extension",
-  "root": "apps/extension",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/extension/src",
   "targets": {
     "build": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "ng build extension",
+        "command": "npm run build",
         "cwd": "apps/extension"
       },
       "outputs": ["{projectRoot}/dist"]
@@ -19,11 +19,7 @@
       }
     },
     "lint": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "ng lint extension",
-        "cwd": "apps/extension"
-      }
+      "executor": "@nx/eslint:lint"
     },
     "serve": {
       "executor": "nx:run-commands",
