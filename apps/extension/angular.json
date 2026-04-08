@@ -38,7 +38,12 @@
             ],
             "styles": [
               "src/styles.scss"
-            ]
+            ],
+            "optimization": {
+              "styles": {
+                "inlineCritical": false
+              }
+            }
           },
           "configurations": {
             "production": {
