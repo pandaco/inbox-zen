@@ -4,13 +4,13 @@ Pour améliorer le tri et l'identification des emails superflus, voici plusieurs
 
 ## 1. Aide à la Désinscription (Unsubscribe Helper)
 Identifier les listes de diffusion et faciliter le nettoyage des abonnements inutiles.
-- [ ] **Détection de `List-Unsubscribe`** : Extraire le header `List-Unsubscribe` pour identifier les emails de masse et proposer un bouton "Se désinscrire" directement dans l'extension.
-- [ ] **Score de "Bruit"** : Classer les expéditeurs par fréquence d'envoi. Un expéditeur qui envoie 5 mails par jour sans interaction mérite une proposition de désinscription.
+- [x] **Détection de `List-Unsubscribe`** : Extraire le header `List-Unsubscribe` pour identifier les emails de masse et proposer un bouton "Se désinscrire" directement dans l'extension.
+- [x] **Score de "Bruit"** : Classer les expéditeurs par fréquence d'envoi. Un expéditeur qui envoie 5 mails par jour sans interaction mérite une proposition de désinscription.
 
 ## 2. Identification des Emails Temporaires
 Beaucoup d'emails n'ont qu'une durée de vie utile très courte.
-- [ ] **Codes OTP / Vérification** : Identifier les mots clés comme "Verification code", "OTP", "One-time password" et proposer de les supprimer s'ils datent de plus de 24h.
-- [ ] **Suivi de Colis** : Identifier les notifications de livraison. Une fois le colis livré (détecté par mots clés), proposer l'archivage ou la suppression.
+- [x] **Codes OTP / Vérification** : Identifier les mots clés comme "Verification code", "OTP", "One-time password" et proposer de les supprimer s'ils datent de plus de 24h.
+- [x] **Suivi de Colis** : Identifier les notifications de livraison. Une fois le colis livré (détecté par mots clés), proposer l'archivage ou la suppression.
 
 ## 3. Analyse Avancée des Pièces Jointes
 Au-delà de la taille de l'email, le type de contenu est crucial pour le nettoyage.
