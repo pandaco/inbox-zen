@@ -9,7 +9,10 @@ export type MessageType =
   | 'GET_PARCEL_NOTIFICATIONS'
   | 'GET_OLD_EMAILS'
   | 'GET_PAST_INVITES'
-  | 'DELETE_EMAILS_BY_QUERY';
+  | 'GET_REDUNDANT_THREADS'
+  | 'GET_OLDEST_EMAILS'
+  | 'DELETE_EMAILS_BY_QUERY'
+  | 'DELETE_MESSAGE';
 
 export interface SubjectStat {
   subject: string;
@@ -38,6 +41,7 @@ export interface SizeStat {
   subject: string;
   from: string;
   sizeEstimate: number;
+  id?: string;
 }
 
 export interface StatsResult<T> {

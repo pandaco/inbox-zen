@@ -1,7 +1,7 @@
 import { 
   getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects, 
   getExpiredOTPs, getParcelNotifications, getOldEmails, getPastCalendarInvites, 
-  deleteEmailsByQuery 
+  deleteEmailsByQuery, getRedundantThreads, getOldestEmails, deleteMessage
 } from './gmail-api';
 import type { BgMessage, BgResponse, PortMessage, StatsResult, SenderStat, SizeStat, SubjectStat } from '../shared/types';
 
@@ -22,6 +22,8 @@ const CACHE_KEYS = {
   GET_PARCEL_NOTIFICATIONS: 'cache_parcel_notifications',
   GET_OLD_EMAILS: 'cache_old_emails',
   GET_PAST_INVITES: 'cache_past_invites',
+  GET_REDUNDANT_THREADS: 'cache_redundant_threads',
+  GET_OLDEST_EMAILS: 'cache_oldest_emails',
 } as const;
 
 type CachedPortName = keyof typeof CACHE_KEYS;
@@ -164,6 +166,23 @@ async function handle(message: BgMessage): Promise<BgResponse> {
       }
     }
 
+    case 'DELETE_MESSAGE': {
+      const token = await getStoredToken();
+      if (!token) return { success: false, error: 'Not authenticated' };
+      const { id } = message as any;
+      if (!id) return { success: false, error: 'Missing message ID' };
+      try {
+        const data = await deleteMessage(token, id);
+        return { success: data };
+      } catch (err) {
+        if (isAuthError(err)) {
+          await chrome.storage.local.remove(TOKEN_KEY);
+          return { success: false, error: 'SESSION_EXPIRED' };
+        }
+        throw err;
+      }
+    }
+
     default:
       return { success: false, error: 'Unknown message type' };
   }
@@ -209,6 +228,8 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'GET_PARCEL_NOTIFICATIONS': promise = getParcelNotifications(token, onProgress); break;
       case 'GET_OLD_EMAILS': promise = getOldEmails(token, onProgress); break;
       case 'GET_PAST_INVITES': promise = getPastCalendarInvites(token, onProgress); break;
+      case 'GET_REDUNDANT_THREADS': promise = getRedundantThreads(token, onProgress); break;
+      case 'GET_OLDEST_EMAILS': promise = getOldestEmails(token); break;
       default: return;
     }
 

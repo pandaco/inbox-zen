@@ -37,7 +37,19 @@ export class StatsService {
     return this.messaging.stream<StatsResult<SubjectStat>>('GET_PAST_INVITES', forceRefresh);
   }
 
+  streamRedundantThreads(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
+    return this.messaging.stream<StatsResult<SubjectStat>>('GET_REDUNDANT_THREADS', forceRefresh);
+  }
+
+  streamOldestEmails(forceRefresh = false): Observable<PortMessage<StatsResult<SizeStat>>> {
+    return this.messaging.stream<StatsResult<SizeStat>>('GET_OLDEST_EMAILS', forceRefresh);
+  }
+
   deleteByQuery(query: string): Observable<BgResponse<{ success: boolean; count: number }>> {
     return this.messaging.send<{ success: boolean; count: number }>({ type: 'DELETE_EMAILS_BY_QUERY', query } as any);
+  }
+
+  deleteMessage(id: string): Observable<BgResponse<boolean>> {
+    return this.messaging.send<boolean>({ type: 'DELETE_MESSAGE', id } as any);
   }
 }

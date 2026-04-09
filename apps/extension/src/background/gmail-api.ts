@@ -364,3 +364,69 @@ export async function deleteEmailsByQuery(
 
   return { success: true, count: ids.length };
 }
+
+export async function getRedundantThreads(
+  token: string,
+  onProgress?: ProgressCallback,
+): Promise<StatsResult<SubjectStat>> {
+  // We search for long threads (arbitrary > 5 messages)
+  // We'll approximate by searching for threads with multiple messages grouping by threadId.
+  
+  const ids = await listAllMessageIds(token, 'in:inbox is:unread');
+  // This is already done in unread senders. 
+  // Let's create a specific view for "Deep Threads"
+  
+  onProgress?.(0, ids.length);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject', 'ThreadId'], onProgress);
+
+  const threadCounts = new Map<string, { subject: string; count: number }>();
+  for (const m of messages) {
+    const threadId = (m as any).threadId || m.id;
+    const existing = threadCounts.get(threadId);
+    if (existing) {
+      existing.count++;
+    } else {
+      threadCounts.set(threadId, {
+        subject: getHeader(m, 'Subject') || '(no subject)',
+        count: 1
+      });
+    }
+  }
+
+  const items = [...threadCounts.values()]
+    .filter(t => t.count > 3) // Only threads with multiple unread messages
+    .sort((a, b) => b.count - a.count);
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function getOldestEmails(
+  token: string,
+  limit = 20
+): Promise<StatsResult<SizeStat>> {
+  // We search for the oldest emails in the inbox
+  const query = 'in:inbox';
+  const ids = await listAllMessageIds(token, query);
+  // listAllMessageIds returns IDs in descending date order (newest first)
+  // We reverse to get oldest
+  const oldestIds = ids.reverse().slice(0, limit);
+  
+  const { messages, errorCount } = await fetchAllMetadata(token, oldestIds, ['Subject', 'From', 'Date']);
+
+  const items = messages.map(m => ({
+    subject: getHeader(m, 'Subject') || '(no subject)',
+    from: getHeader(m, 'From'),
+    sizeEstimate: (m as any).sizeEstimate || 0,
+    id: m.id // needed for action
+  }));
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function deleteMessage(token: string, id: string): Promise<boolean> {
+  const res = await fetch(`${GMAIL_API}/messages/${id}/trash`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.ok;
+}

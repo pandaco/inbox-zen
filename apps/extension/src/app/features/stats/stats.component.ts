@@ -20,7 +20,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 'old' | 'invites';
+type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 'old' | 'invites' | 'redundant' | 'challenge';
 
 @Component({
   selector: 'app-stats',
@@ -77,6 +77,14 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
         <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
           [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites">
           Invites
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'redundant'"
+          [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Redundant message threads">
+          Redundant
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
+          [class.active]="activeTab() === 'challenge'" (click)="setTab('challenge')" title="Zero-Inbox Challenge">
+          Challenge ⚡
         </button>
         <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
           [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
@@ -213,7 +221,23 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
               }
             </ol>
             }
-            } @else if (activeTab() === 'filters') {
+            } @else if (activeTab() === 'challenge') {
+          <div class="challenge">
+            @if (!challengeCurrent()) {
+              <p class="stats__empty">Challenge completed! No more old emails in inbox. 🎉</p>
+            } @else {
+              <div class="challenge__card">
+                <div class="challenge__meta">Oldest Email ({{ oldestEmails().length }} left)</div>
+                <h2 class="challenge__subject">{{ challengeCurrent()?.subject }}</h2>
+                <div class="challenge__from">{{ challengeCurrent()?.from }}</div>
+                <div class="challenge__actions">
+                  <button class="challenge__btn challenge__btn--keep" (click)="skipChallenge(challengeCurrent()!)">Keep</button>
+                  <button class="challenge__btn challenge__btn--trash" (click)="trashChallenge(challengeCurrent()!)">Trash</button>
+                </div>
+              </div>
+            }
+          </div>
+        } @else if (activeTab() === 'filters') {
             <div class="filters">
             <p class="filters__desc">Quick searches to clean up your inbox.</p>
             <ul class="filters__list">
@@ -455,6 +479,27 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
       font-family: inherit; transition: background 0.2s;
     }
     .filters__btn:hover { background: #f1f3f4; }
+
+    /* Challenge Mode */
+    .challenge { padding: 2rem 1.2rem; display: flex; justify-content: center; }
+    .challenge__card {
+      width: 100%; max-width: 350px; background: #fff; border: 1px solid #e0e0e0;
+      border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      display: flex; flex-direction: column; gap: 1rem;
+    }
+    .challenge__meta { font-size: 0.7rem; font-weight: 600; color: #1a73e8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .challenge__subject { margin: 0; font-size: 1rem; font-weight: 600; color: #202124; line-height: 1.4; }
+    .challenge__from { font-size: 0.82rem; color: #5f6368; word-break: break-all; }
+    .challenge__actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
+    .challenge__btn {
+      flex: 1; padding: 0.7rem; border: 1px solid #dadce0; border-radius: 8px;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer; font-family: inherit;
+      transition: all 0.2s;
+    }
+    .challenge__btn--keep { background: #fff; color: #1a73e8; }
+    .challenge__btn--keep:hover { background: #f8f9fa; border-color: #1a73e8; }
+    .challenge__btn--trash { background: #c5221f; color: #fff; border-color: #c5221f; }
+    .challenge__btn--trash:hover { background: #a50e0e; }
   `,
 })
 export class StatsComponent implements OnInit, OnDestroy {
@@ -478,6 +523,8 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly parcels = signal<SubjectStat[]>([]);
   protected readonly oldEmails = signal<SubjectStat[]>([]);
   protected readonly pastInvites = signal<SubjectStat[]>([]);
+  protected readonly redundantThreads = signal<SubjectStat[]>([]);
+  protected readonly oldestEmails = signal<SizeStat[]>([]);
   protected readonly unreadFetched = signal(0);
   protected readonly unreadErrors = signal(0);
   protected readonly heaviestFetched = signal(0);
@@ -492,6 +539,10 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly oldErrors = signal(0);
   protected readonly invitesFetched = signal(0);
   protected readonly invitesErrors = signal(0);
+  protected readonly redundantFetched = signal(0);
+  protected readonly redundantErrors = signal(0);
+  protected readonly challengeFetched = signal(0);
+  protected readonly challengeErrors = signal(0);
   protected readonly loadFetched = signal(0);
   protected readonly loadTotal = signal(0);
   protected readonly displayCount = signal(this.PAGE_SIZE);
@@ -502,6 +553,8 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly parcelsCachedAt = signal<number | null>(null);
   protected readonly oldCachedAt = signal<number | null>(null);
   protected readonly invitesCachedAt = signal<number | null>(null);
+  protected readonly redundantCachedAt = signal<number | null>(null);
+  protected readonly challengeCachedAt = signal<number | null>(null);
 
   protected readonly totalFetched = computed(() => {
     const tab = this.activeTab();
@@ -511,6 +564,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'parcels') return this.parcelsFetched();
     if (tab === 'old') return this.oldFetched();
     if (tab === 'invites') return this.invitesFetched();
+    if (tab === 'redundant') return this.redundantFetched();
+    if (tab === 'challenge') return this.challengeFetched();
     return this.heaviestFetched();
   });
   protected readonly errorCount = computed(() => {
@@ -521,6 +576,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'parcels') return this.parcelsErrors();
     if (tab === 'old') return this.oldErrors();
     if (tab === 'invites') return this.invitesErrors();
+    if (tab === 'redundant') return this.redundantErrors();
+    if (tab === 'challenge') return this.challengeErrors();
     return this.heaviestErrors();
   });
   protected readonly visibleSenders = computed(() =>
@@ -544,6 +601,10 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly visibleInvites = computed(() =>
     this.pastInvites().slice(0, this.displayCount()),
   );
+
+  protected readonly visibleRedundant = computed(() =>
+    this.redundantThreads().slice(0, this.displayCount()),
+  );
   protected readonly hasMore = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.senders().length > this.displayCount();
@@ -552,6 +613,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'parcels') return this.parcels().length > this.displayCount();
     if (tab === 'old') return this.oldEmails().length > this.displayCount();
     if (tab === 'invites') return this.pastInvites().length > this.displayCount();
+    if (tab === 'redundant') return this.redundantThreads().length > this.displayCount();
+    if (tab === 'challenge') return false;
     return this.heaviest().length > this.displayCount();
   });
   protected readonly activeCachedAt = computed(() => {
@@ -562,6 +625,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'parcels') return this.parcelsCachedAt();
     if (tab === 'old') return this.oldCachedAt();
     if (tab === 'invites') return this.invitesCachedAt();
+    if (tab === 'redundant') return this.redundantCachedAt();
+    if (tab === 'challenge') return this.challengeCachedAt();
     return this.heaviestCachedAt();
   });
 
@@ -578,12 +643,17 @@ export class StatsComponent implements OnInit, OnDestroy {
     Math.max(1, ...this.pastInvites().map((s) => s.count)),
   );
 
+  protected readonly redundantMax = computed(() =>
+    Math.max(1, ...this.redundantThreads().map((s) => s.count)),
+  );
+
   protected readonly currentItems = computed(() => {
     const tab = this.activeTab();
     if (tab === 'otp') return this.visibleOTPs();
     if (tab === 'parcels') return this.visibleParcels();
     if (tab === 'old') return this.visibleOld();
     if (tab === 'invites') return this.visibleInvites();
+    if (tab === 'redundant') return this.visibleRedundant();
     return this.visibleRepeated();
   });
 
@@ -593,8 +663,13 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'parcels') return this.parcelsMax();
     if (tab === 'old') return this.oldMax();
     if (tab === 'invites') return this.invitesMax();
+    if (tab === 'redundant') return this.redundantMax();
     return this.repeatedMax();
   });
+
+  protected readonly challengeCurrent = computed(() =>
+    this.oldestEmails().length > 0 ? this.oldestEmails()[0] : null
+  );
 
   // true when data came from cache (not a live fetch just performed)
   protected readonly isFromCache = computed(() => {
@@ -689,6 +764,20 @@ export class StatsComponent implements OnInit, OnDestroy {
     }
   }
 
+  protected skipChallenge(item: SizeStat): void {
+    this.oldestEmails.update(list => list.filter(e => e.id !== item.id));
+  }
+
+  protected trashChallenge(item: SizeStat): void {
+    if (item.id) {
+      this.statsService.deleteMessage(item.id).subscribe(res => {
+        if (res.success) {
+          this.oldestEmails.update(list => list.filter(e => e.id !== item.id));
+        }
+      });
+    }
+  }
+
   protected load(forceRefresh = false): void {
     this.isLoading.set(true);
     this.error.set(null);
@@ -706,6 +795,10 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.oldErrors.set(0);
     this.invitesFetched.set(0);
     this.invitesErrors.set(0);
+    this.redundantFetched.set(0);
+    this.redundantErrors.set(0);
+    this.challengeFetched.set(0);
+    this.challengeErrors.set(0);
     this.loadFetched.set(0);
     this.loadTotal.set(0);
     this.displayCount.set(this.PAGE_SIZE);
@@ -718,10 +811,12 @@ export class StatsComponent implements OnInit, OnDestroy {
       this.parcelsCachedAt.set(null);
       this.oldCachedAt.set(null);
       this.invitesCachedAt.set(null);
+      this.redundantCachedAt.set(null);
+      this.challengeCachedAt.set(null);
     }
 
     let completed = 0;
-    const TOTAL_STREAMS = 7;
+    const TOTAL_STREAMS = 9;
 
     const checkDone = (err?: string): void => {
       if (err) this.error.set(err);
@@ -857,6 +952,42 @@ export class StatsComponent implements OnInit, OnDestroy {
             this.invitesFetched.set(msg.data.totalFetched);
             this.invitesErrors.set(msg.data.errorCount);
             this.invitesCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+
+    this.statsService.streamRedundantThreads(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.redundantThreads.set(msg.data.items);
+            this.redundantFetched.set(msg.data.totalFetched);
+            this.redundantErrors.set(msg.data.errorCount);
+            this.redundantCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+
+    this.statsService.streamOldestEmails(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.oldestEmails.set(msg.data.items);
+            this.challengeFetched.set(msg.data.totalFetched);
+            this.challengeErrors.set(msg.data.errorCount);
+            this.challengeCachedAt.set(msg.cachedAt ?? Date.now());
             checkDone();
           }
         }
