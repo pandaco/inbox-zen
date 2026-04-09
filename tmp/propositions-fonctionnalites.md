@@ -19,12 +19,12 @@ Au-delà de la taille de l'email, le type de contenu est crucial pour le nettoya
 
 ## 4. Filtres de "Péremption" (Expiration Filters)
 Permettre à l'utilisateur de définir des règles de nettoyage basées sur l'âge du mail.
-- [ ] **Emails > 2 ans sans Label** : Identifier les mails anciens qui n'ont jamais été classés manuellement (probablement du bruit).
-- [ ] **Invitations Calendrier passées** : Identifier les invitations à des réunions ou événements terminés depuis longtemps.
+- [x] **Emails > 2 ans sans Label** : Identifier les mails anciens qui n'ont jamais été classés manuellement (probablement du bruit).
+- [x] **Invitations Calendrier passées** : Identifier les invitations à des réunions ou événements terminés depuis longtemps.
 
 ## 5. Visualisations et Actions Groupées (Batch Actions)
 Améliorer l'interface pour agir plus vite.
-- [ ] **Nettoyage par Expéditeur (One-Click Cleanup)** : Ajouter un bouton "Tout supprimer" ou "Tout archiver" à côté de chaque ligne dans l'onglet "Top Senders".
+- [x] **Nettoyage par Expéditeur (One-Click Cleanup)** : Ajouter un bouton "Tout supprimer" ou "Tout archiver" à côté de chaque ligne dans l'onglet "Top Senders".
 - [ ] **Heatmap de l'Inbox** : Afficher une vue calendaire montrant les jours/mois où l'accumulation de mails a été la plus forte pour cibler les périodes à nettoyer.
 
 ## 6. Détection de Redondance dans les Fils (Thread Optimization)
