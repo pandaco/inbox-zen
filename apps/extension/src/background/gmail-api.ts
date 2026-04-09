@@ -78,7 +78,9 @@ function parseBatchResponse(text: string, contentType: string): MessageMetadata[
       const jsonEnd = part.lastIndexOf('}');
       if (jsonStart === -1 || jsonEnd === -1) return [];
       try {
-        return [JSON.parse(part.slice(jsonStart, jsonEnd + 1)) as MessageMetadata];
+        const parsed = JSON.parse(part.slice(jsonStart, jsonEnd + 1)) as MessageMetadata;
+        if (!parsed.id) return []; // skip error responses (e.g. 404 per-item failures)
+        return [parsed];
       } catch {
         return [];
       }
@@ -174,7 +176,7 @@ export async function getTopUnreadSenders(
   token: string,
   onProgress?: ProgressCallback,
 ): Promise<StatsResult<SenderStat>> {
-  const ids = await listAllMessageIds(token, 'is:unread');
+  const ids = await listAllMessageIds(token, 'in:inbox is:unread');
   onProgress?.(0, ids.length);
   const { messages, errorCount } = await fetchAllMetadata(token, ids, ['From'], onProgress);
 
@@ -222,7 +224,7 @@ export async function getTopRepeatedSubjects(
   token: string,
   onProgress?: ProgressCallback,
 ): Promise<StatsResult<SubjectStat>> {
-  const ids = await listAllMessageIds(token, 'is:unread');
+  const ids = await listAllMessageIds(token, 'in:inbox is:unread');
   onProgress?.(0, ids.length);
   const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject'], onProgress);
 

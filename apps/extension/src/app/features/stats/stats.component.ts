@@ -20,7 +20,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-type Tab = 'unread' | 'heaviest' | 'repeated';
+type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters';
 
 @Component({
   selector: 'app-stats',
@@ -29,14 +29,24 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
     <div class="stats">
       <header class="stats__header">
         <h1 class="stats__title">Inbox Zen</h1>
-        <button class="stats__logout" (click)="auth.logout()" aria-label="Sign out">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-               fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-        </button>
+        <div class="stats__actions">
+          <button class="stats__action-btn" (click)="openInNewTab()" aria-label="Open in new tab" title="Open in new tab">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <line x1="10" y1="14" x2="21" y2="3"></line>
+            </svg>
+          </button>
+          <button class="stats__action-btn" (click)="auth.logout()" aria-label="Sign out" title="Sign out">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </div>
       </header>
 
       <nav class="stats__tabs" role="tablist">
@@ -51,6 +61,10 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
         <button role="tab" [attr.aria-selected]="activeTab() === 'heaviest'"
           [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
           Heaviest
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
+          [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
+          Filters
         </button>
       </nav>
 
@@ -120,12 +134,13 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
           } @else {
             <ol class="chart" aria-label="Top subjects by repetition count">
               @for (item of visibleRepeated(); track item.subject; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchRepeated(item)"
-                    (keydown.enter)="searchRepeated(item)"
-                    (keydown.space)="searchRepeated(item)"
-                    [title]="'Search: ' + item.subject">
+                <li [class]="item.subject === '(no subject)' ? 'chart__row' : 'chart__row chart__row--clickable'"
+                    [attr.role]="item.subject === '(no subject)' ? null : 'button'"
+                    [attr.tabindex]="item.subject === '(no subject)' ? null : 0"
+                    (click)="item.subject !== '(no subject)' && searchRepeated(item)"
+                    (keydown.enter)="item.subject !== '(no subject)' && searchRepeated(item)"
+                    (keydown.space)="item.subject !== '(no subject)' && searchRepeated(item)"
+                    [title]="item.subject === '(no subject)' ? 'Gmail does not support searching for emails without a subject' : 'Search: ' + item.subject">
                   <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
@@ -143,7 +158,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
               }
             </ol>
           }
-        } @else {
+        } @else if (activeTab() === 'heaviest') {
           @if (heaviest().length === 0) {
             <p class="stats__empty">No heavy emails found.</p>
           } @else {
@@ -171,11 +186,18 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
                 </li>
               }
             </ol>
-          }
-        }
-        @if (hasMore()) {
-          <div #sentinel class="stats__sentinel" aria-hidden="true"></div>
-        }
+            }
+            } @else if (activeTab() === 'filters') {
+            <div class="filters">
+            <p class="filters__desc">Quick searches to clean up your inbox.</p>
+            <ul class="filters__list">
+            <li><button class="filters__btn" (click)="searchFilter('newsletter')">Newsletters</button></li>
+            <li><button class="filters__btn" (click)="searchFilter('unsubscribe OR &quot;se désinscrire&quot; OR &quot;se désabonner&quot;')">Unsubscribe links</button></li>
+            </ul>
+            </div>
+            }
+            @if (hasMore() && activeTab() !== 'filters') {
+            <div #sentinel class="stats__sentinel" aria-hidden="true"></div>        }
       </div>
 
       <footer class="stats__footer">
@@ -211,12 +233,17 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
 
     .stats__title { margin: 0; font-size: 1.1rem; font-weight: 600; }
 
-    .stats__logout {
+    .stats__actions {
+      display: flex;
+      gap: 0.2rem;
+    }
+
+    .stats__action-btn {
       display: flex; align-items: center; justify-content: center;
       width: 32px; height: 32px; border: none; border-radius: 50%;
       background: transparent; color: #5f6368; cursor: pointer;
     }
-    .stats__logout:hover { background: #f1f3f4; }
+    .stats__action-btn:hover { background: #f1f3f4; }
 
     .stats__tabs {
       display: flex;
@@ -374,6 +401,18 @@ type Tab = 'unread' | 'heaviest' | 'repeated';
     .stats__refresh:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .stats__sentinel { height: 1px; }
+
+    /* Filters Tab */
+    .filters { padding: 1rem 1.2rem; }
+    .filters__desc { font-size: 0.85rem; color: #5f6368; margin-bottom: 1rem; }
+    .filters__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+    .filters__btn {
+      width: 100%; padding: 0.6rem 1rem; text-align: left;
+      background: #f8f9fa; border: 1px solid #dadce0; border-radius: 6px;
+      font-size: 0.85rem; color: #1a73e8; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: background 0.2s;
+    }
+    .filters__btn:hover { background: #f1f3f4; }
   `,
 })
 export class StatsComponent implements OnInit, OnDestroy {
@@ -502,6 +541,10 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.gmailSearch.search(`subject:"${item.subject}"`);
   }
 
+  protected searchFilter(query: string): void {
+    this.gmailSearch.search(query);
+  }
+
   protected load(forceRefresh = false): void {
     this.isLoading.set(true);
     this.error.set(null);
@@ -589,5 +632,11 @@ export class StatsComponent implements OnInit, OnDestroy {
       },
       error: () => checkDone('Unexpected error'),
     });
+  }
+
+  openInNewTab() {
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
+      chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+    }
   }
 }
