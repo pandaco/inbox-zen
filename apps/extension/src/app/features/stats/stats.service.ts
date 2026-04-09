@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ChromeMessagingService } from '../../core/messaging/chrome-messaging.service';
-import type { SenderStat, SizeStat, SubjectStat, StatsResult, PortMessage } from '../../../shared/types';
+import type { SenderStat, SizeStat, SubjectStat, StatsResult, PortMessage, BgResponse } from '../../../shared/types';
 
-export type { SenderStat, SizeStat, SubjectStat, StatsResult, PortMessage };
+export type { SenderStat, SizeStat, SubjectStat, StatsResult, PortMessage, BgResponse };
 
 @Injectable({ providedIn: 'root' })
 export class StatsService {
@@ -27,5 +27,17 @@ export class StatsService {
 
   streamParcelNotifications(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
     return this.messaging.stream<StatsResult<SubjectStat>>('GET_PARCEL_NOTIFICATIONS', forceRefresh);
+  }
+
+  streamOldEmails(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
+    return this.messaging.stream<StatsResult<SubjectStat>>('GET_OLD_EMAILS', forceRefresh);
+  }
+
+  streamPastInvites(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
+    return this.messaging.stream<StatsResult<SubjectStat>>('GET_PAST_INVITES', forceRefresh);
+  }
+
+  deleteByQuery(query: string): Observable<BgResponse<{ success: boolean; count: number }>> {
+    return this.messaging.send<{ success: boolean; count: number }>({ type: 'DELETE_EMAILS_BY_QUERY', query } as any);
   }
 }

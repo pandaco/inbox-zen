@@ -20,7 +20,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels';
+type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 'old' | 'invites';
 
 @Component({
   selector: 'app-stats',
@@ -69,6 +69,14 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels';
         <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
           [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Parcel tracking">
           Parcels
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'old'"
+          [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 2 years without label">
+          Old
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
+          [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites">
+          Invites
         </button>
         <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
           [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
@@ -129,6 +137,10 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels';
                           Unsubscribe
                         </button>
                       }
+                      <button class="chart__clear" (click)="$event.stopPropagation(); clearSender(item)"
+                              title="Clear all unread emails from this sender">
+                        Clear All
+                      </button>
                       <span class="chart__value">{{ item.count }}</span>
                     </div>
                     <div class="chart__bar-bg" role="presentation">
@@ -379,6 +391,14 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels';
     }
     .chart__unsub:hover { background: #e8eaed; color: #202124; }
 
+    .chart__clear {
+      font-size: 0.7rem; color: #c5221f; background: #fff;
+      border: 1px solid #f5c2c7; border-radius: 4px;
+      padding: 2px 6px; cursor: pointer; font-weight: 500;
+      margin-left: 0.4rem;
+    }
+    .chart__clear:hover { background: #fce8e6; }
+
     .chart__bar-bg {
       width: 100%;
       height: 6px;
@@ -456,6 +476,8 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly repeated = signal<SubjectStat[]>([]);
   protected readonly otps = signal<SubjectStat[]>([]);
   protected readonly parcels = signal<SubjectStat[]>([]);
+  protected readonly oldEmails = signal<SubjectStat[]>([]);
+  protected readonly pastInvites = signal<SubjectStat[]>([]);
   protected readonly unreadFetched = signal(0);
   protected readonly unreadErrors = signal(0);
   protected readonly heaviestFetched = signal(0);
@@ -466,6 +488,10 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly otpErrors = signal(0);
   protected readonly parcelsFetched = signal(0);
   protected readonly parcelsErrors = signal(0);
+  protected readonly oldFetched = signal(0);
+  protected readonly oldErrors = signal(0);
+  protected readonly invitesFetched = signal(0);
+  protected readonly invitesErrors = signal(0);
   protected readonly loadFetched = signal(0);
   protected readonly loadTotal = signal(0);
   protected readonly displayCount = signal(this.PAGE_SIZE);
@@ -474,6 +500,8 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly repeatedCachedAt = signal<number | null>(null);
   protected readonly otpCachedAt = signal<number | null>(null);
   protected readonly parcelsCachedAt = signal<number | null>(null);
+  protected readonly oldCachedAt = signal<number | null>(null);
+  protected readonly invitesCachedAt = signal<number | null>(null);
 
   protected readonly totalFetched = computed(() => {
     const tab = this.activeTab();
@@ -481,6 +509,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'repeated') return this.repeatedFetched();
     if (tab === 'otp') return this.otpFetched();
     if (tab === 'parcels') return this.parcelsFetched();
+    if (tab === 'old') return this.oldFetched();
+    if (tab === 'invites') return this.invitesFetched();
     return this.heaviestFetched();
   });
   protected readonly errorCount = computed(() => {
@@ -489,6 +519,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'repeated') return this.repeatedErrors();
     if (tab === 'otp') return this.otpErrors();
     if (tab === 'parcels') return this.parcelsErrors();
+    if (tab === 'old') return this.oldErrors();
+    if (tab === 'invites') return this.invitesErrors();
     return this.heaviestErrors();
   });
   protected readonly visibleSenders = computed(() =>
@@ -506,12 +538,20 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly visibleParcels = computed(() =>
     this.parcels().slice(0, this.displayCount()),
   );
+  protected readonly visibleOld = computed(() =>
+    this.oldEmails().slice(0, this.displayCount()),
+  );
+  protected readonly visibleInvites = computed(() =>
+    this.pastInvites().slice(0, this.displayCount()),
+  );
   protected readonly hasMore = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.senders().length > this.displayCount();
     if (tab === 'repeated') return this.repeated().length > this.displayCount();
     if (tab === 'otp') return this.otps().length > this.displayCount();
     if (tab === 'parcels') return this.parcels().length > this.displayCount();
+    if (tab === 'old') return this.oldEmails().length > this.displayCount();
+    if (tab === 'invites') return this.pastInvites().length > this.displayCount();
     return this.heaviest().length > this.displayCount();
   });
   protected readonly activeCachedAt = computed(() => {
@@ -520,6 +560,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'repeated') return this.repeatedCachedAt();
     if (tab === 'otp') return this.otpCachedAt();
     if (tab === 'parcels') return this.parcelsCachedAt();
+    if (tab === 'old') return this.oldCachedAt();
+    if (tab === 'invites') return this.invitesCachedAt();
     return this.heaviestCachedAt();
   });
 
@@ -529,11 +571,19 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly parcelsMax = computed(() =>
     Math.max(1, ...this.parcels().map((s) => s.count)),
   );
+  protected readonly oldMax = computed(() =>
+    Math.max(1, ...this.oldEmails().map((s) => s.count)),
+  );
+  protected readonly invitesMax = computed(() =>
+    Math.max(1, ...this.pastInvites().map((s) => s.count)),
+  );
 
   protected readonly currentItems = computed(() => {
     const tab = this.activeTab();
     if (tab === 'otp') return this.visibleOTPs();
     if (tab === 'parcels') return this.visibleParcels();
+    if (tab === 'old') return this.visibleOld();
+    if (tab === 'invites') return this.visibleInvites();
     return this.visibleRepeated();
   });
 
@@ -541,6 +591,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     const tab = this.activeTab();
     if (tab === 'otp') return this.otpMax();
     if (tab === 'parcels') return this.parcelsMax();
+    if (tab === 'old') return this.oldMax();
+    if (tab === 'invites') return this.invitesMax();
     return this.repeatedMax();
   });
 
@@ -617,6 +669,26 @@ export class StatsComponent implements OnInit, OnDestroy {
     }
   }
 
+  protected clearSender(item: SenderStat): void {
+    if (confirm(`Delete ALL unread emails from ${item.sender}?`)) {
+      this.isLoading.set(true);
+      this.statsService.deleteByQuery(`from:${item.email} is:unread`).subscribe({
+        next: (res) => {
+          if (res.success) {
+            this.load(true); // reload to update counts
+          } else {
+            this.isLoading.set(false);
+            this.error.set(res.error || 'Failed to delete');
+          }
+        },
+        error: () => {
+          this.isLoading.set(false);
+          this.error.set('Unexpected error');
+        }
+      });
+    }
+  }
+
   protected load(forceRefresh = false): void {
     this.isLoading.set(true);
     this.error.set(null);
@@ -630,6 +702,10 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.otpErrors.set(0);
     this.parcelsFetched.set(0);
     this.parcelsErrors.set(0);
+    this.oldFetched.set(0);
+    this.oldErrors.set(0);
+    this.invitesFetched.set(0);
+    this.invitesErrors.set(0);
     this.loadFetched.set(0);
     this.loadTotal.set(0);
     this.displayCount.set(this.PAGE_SIZE);
@@ -640,10 +716,12 @@ export class StatsComponent implements OnInit, OnDestroy {
       this.repeatedCachedAt.set(null);
       this.otpCachedAt.set(null);
       this.parcelsCachedAt.set(null);
+      this.oldCachedAt.set(null);
+      this.invitesCachedAt.set(null);
     }
 
     let completed = 0;
-    const TOTAL_STREAMS = 5;
+    const TOTAL_STREAMS = 7;
 
     const checkDone = (err?: string): void => {
       if (err) this.error.set(err);
@@ -743,6 +821,42 @@ export class StatsComponent implements OnInit, OnDestroy {
             this.parcelsFetched.set(msg.data.totalFetched);
             this.parcelsErrors.set(msg.data.errorCount);
             this.parcelsCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+
+    this.statsService.streamOldEmails(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.oldEmails.set(msg.data.items);
+            this.oldFetched.set(msg.data.totalFetched);
+            this.oldErrors.set(msg.data.errorCount);
+            this.oldCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+
+    this.statsService.streamPastInvites(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.pastInvites.set(msg.data.items);
+            this.invitesFetched.set(msg.data.totalFetched);
+            this.invitesErrors.set(msg.data.errorCount);
+            this.invitesCachedAt.set(msg.cachedAt ?? Date.now());
             checkDone();
           }
         }

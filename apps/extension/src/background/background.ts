@@ -1,4 +1,8 @@
-import { getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects, getExpiredOTPs, getParcelNotifications } from './gmail-api';
+import { 
+  getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects, 
+  getExpiredOTPs, getParcelNotifications, getOldEmails, getPastCalendarInvites, 
+  deleteEmailsByQuery 
+} from './gmail-api';
 import type { BgMessage, BgResponse, PortMessage, StatsResult, SenderStat, SizeStat, SubjectStat } from '../shared/types';
 
 export type { BgMessage, BgResponse };
@@ -16,6 +20,8 @@ const CACHE_KEYS = {
   GET_TOP_REPEATED_SUBJECTS: 'cache_repeated_subjects',
   GET_EXPIRED_OTPS: 'cache_expired_otps',
   GET_PARCEL_NOTIFICATIONS: 'cache_parcel_notifications',
+  GET_OLD_EMAILS: 'cache_old_emails',
+  GET_PAST_INVITES: 'cache_past_invites',
 } as const;
 
 type CachedPortName = keyof typeof CACHE_KEYS;
@@ -141,6 +147,23 @@ async function handle(message: BgMessage): Promise<BgResponse> {
       }
     }
 
+    case 'DELETE_EMAILS_BY_QUERY': {
+      const token = await getStoredToken();
+      if (!token) return { success: false, error: 'Not authenticated' };
+      const { query } = message as any;
+      if (!query) return { success: false, error: 'Missing query' };
+      try {
+        const data = await deleteEmailsByQuery(token, query);
+        return { success: true, data };
+      } catch (err) {
+        if (isAuthError(err)) {
+          await chrome.storage.local.remove(TOKEN_KEY);
+          return { success: false, error: 'SESSION_EXPIRED' };
+        }
+        throw err;
+      }
+    }
+
     default:
       return { success: false, error: 'Unknown message type' };
   }
@@ -184,6 +207,8 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'GET_TOP_REPEATED_SUBJECTS': promise = getTopRepeatedSubjects(token, onProgress); break;
       case 'GET_EXPIRED_OTPS': promise = getExpiredOTPs(token, onProgress); break;
       case 'GET_PARCEL_NOTIFICATIONS': promise = getParcelNotifications(token, onProgress); break;
+      case 'GET_OLD_EMAILS': promise = getOldEmails(token, onProgress); break;
+      case 'GET_PAST_INVITES': promise = getPastCalendarInvites(token, onProgress); break;
       default: return;
     }
 

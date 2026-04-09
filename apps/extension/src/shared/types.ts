@@ -6,7 +6,10 @@ export type MessageType =
   | 'GET_TOP_HEAVIEST_EMAILS'
   | 'GET_TOP_REPEATED_SUBJECTS'
   | 'GET_EXPIRED_OTPS'
-  | 'GET_PARCEL_NOTIFICATIONS';
+  | 'GET_PARCEL_NOTIFICATIONS'
+  | 'GET_OLD_EMAILS'
+  | 'GET_PAST_INVITES'
+  | 'DELETE_EMAILS_BY_QUERY';
 
 export interface SubjectStat {
   subject: string;

@@ -302,3 +302,65 @@ export async function getParcelNotifications(
 
   return { items, totalFetched: messages.length, errorCount };
 }
+
+export async function getOldEmails(
+  token: string,
+  onProgress?: ProgressCallback,
+): Promise<StatsResult<SubjectStat>> {
+  const query = 'older_than:2y -has:userlabels';
+  const ids = await listAllMessageIds(token, query);
+  onProgress?.(0, ids.length);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject'], onProgress);
+
+  const items = messages.map(m => ({
+    subject: getHeader(m, 'Subject') || '(no subject)',
+    count: 1,
+  }));
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function getPastCalendarInvites(
+  token: string,
+  onProgress?: ProgressCallback,
+): Promise<StatsResult<SubjectStat>> {
+  const query = 'filename:invite.ics older_than:7d';
+  const ids = await listAllMessageIds(token, query);
+  onProgress?.(0, ids.length);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject'], onProgress);
+
+  const items = messages.map(m => ({
+    subject: getHeader(m, 'Subject') || '(no subject)',
+    count: 1,
+  }));
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function deleteEmailsByQuery(
+  token: string,
+  query: string,
+): Promise<{ success: boolean; count: number }> {
+  const ids = await listAllMessageIds(token, query);
+  if (ids.length === 0) return { success: true, count: 0 };
+
+  // Gmail batchDelete supports up to 1000 IDs per call
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 1000) {
+    chunks.push(ids.slice(i, i + 1000));
+  }
+
+  for (const chunk of chunks) {
+    const res = await fetch(`${GMAIL_API}/messages/batchDelete`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: chunk }),
+    });
+    if (!res.ok) throw new Error(`Batch delete failed: ${res.status}`);
+  }
+
+  return { success: true, count: ids.length };
+}
