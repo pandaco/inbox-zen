@@ -20,4 +20,12 @@ export class StatsService {
   streamRepeatedSubjects(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
     return this.messaging.stream<StatsResult<SubjectStat>>('GET_TOP_REPEATED_SUBJECTS', forceRefresh);
   }
+
+  streamExpiredOTPs(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
+    return this.messaging.stream<StatsResult<SubjectStat>>('GET_EXPIRED_OTPS', forceRefresh);
+  }
+
+  streamParcelNotifications(forceRefresh = false): Observable<PortMessage<StatsResult<SubjectStat>>> {
+    return this.messaging.stream<StatsResult<SubjectStat>>('GET_PARCEL_NOTIFICATIONS', forceRefresh);
+  }
 }

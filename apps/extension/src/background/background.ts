@@ -1,4 +1,4 @@
-import { getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects } from './gmail-api';
+import { getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects, getExpiredOTPs, getParcelNotifications } from './gmail-api';
 import type { BgMessage, BgResponse, PortMessage, StatsResult, SenderStat, SizeStat, SubjectStat } from '../shared/types';
 
 export type { BgMessage, BgResponse };
@@ -14,6 +14,8 @@ const CACHE_KEYS = {
   GET_TOP_UNREAD_SENDERS: 'cache_unread_senders',
   GET_TOP_HEAVIEST_EMAILS: 'cache_heaviest_emails',
   GET_TOP_REPEATED_SUBJECTS: 'cache_repeated_subjects',
+  GET_EXPIRED_OTPS: 'cache_expired_otps',
+  GET_PARCEL_NOTIFICATIONS: 'cache_parcel_notifications',
 } as const;
 
 type CachedPortName = keyof typeof CACHE_KEYS;
@@ -149,11 +151,7 @@ chrome.runtime.onConnect.addListener((port) => {
   const [baseName, flag] = port.name.split(':') as [string, string | undefined];
   const forceRefresh = flag === 'refresh';
 
-  if (
-    baseName !== 'GET_TOP_UNREAD_SENDERS' &&
-    baseName !== 'GET_TOP_HEAVIEST_EMAILS' &&
-    baseName !== 'GET_TOP_REPEATED_SUBJECTS'
-  ) return;
+  if (!(baseName in CACHE_KEYS)) return;
 
   const portName = baseName as CachedPortName;
   const cacheKey = CACHE_KEYS[portName];
@@ -169,11 +167,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     if (!forceRefresh) {
-      const cached =
-        portName === 'GET_TOP_UNREAD_SENDERS' ? await getCached<SenderStat>(cacheKey) :
-        portName === 'GET_TOP_HEAVIEST_EMAILS' ? await getCached<SizeStat>(cacheKey) :
-        await getCached<SubjectStat>(cacheKey);
-
+      const cached = await getCached<any>(cacheKey);
       if (cached) {
         send({ type: 'RESULT', success: true, data: cached.result, cachedAt: cached.cachedAt });
         return;
@@ -183,10 +177,15 @@ chrome.runtime.onConnect.addListener((port) => {
     const onProgress = (fetched: number, total: number): void =>
       send({ type: 'PROGRESS', fetched, total });
 
-    const promise: Promise<StatsResult<SenderStat> | StatsResult<SizeStat> | StatsResult<SubjectStat>> =
-      portName === 'GET_TOP_UNREAD_SENDERS' ? getTopUnreadSenders(token, onProgress) :
-      portName === 'GET_TOP_HEAVIEST_EMAILS' ? getTopHeaviestEmails(token, onProgress) :
-      getTopRepeatedSubjects(token, onProgress);
+    let promise: Promise<StatsResult<any>>;
+    switch (portName) {
+      case 'GET_TOP_UNREAD_SENDERS': promise = getTopUnreadSenders(token, onProgress); break;
+      case 'GET_TOP_HEAVIEST_EMAILS': promise = getTopHeaviestEmails(token, onProgress); break;
+      case 'GET_TOP_REPEATED_SUBJECTS': promise = getTopRepeatedSubjects(token, onProgress); break;
+      case 'GET_EXPIRED_OTPS': promise = getExpiredOTPs(token, onProgress); break;
+      case 'GET_PARCEL_NOTIFICATIONS': promise = getParcelNotifications(token, onProgress); break;
+      default: return;
+    }
 
     promise
       .then(async data => {
