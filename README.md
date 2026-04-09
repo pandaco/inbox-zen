@@ -9,6 +9,7 @@ Inbox Zen is an intelligent browser extension that integrates directly into the 
 - **Seamless Integration:** A discrete floating button and side panel injected directly into Gmail.
 - **Quick Actions:** Launch pre-configured Gmail searches with one click from the assistant.
 - **Performance:** Uses local caching and request batching for a smooth experience.
+- **Maximized View:** Open the assistant in a dedicated new tab for a more comfortable and spacious experience.
 
 ## Project Structure
 
