@@ -25,13 +25,13 @@ Permettre à l'utilisateur de définir des règles de nettoyage basées sur l'â
 ## 5. Visualisations et Actions Groupées (Batch Actions)
 Améliorer l'interface pour agir plus vite.
 - [x] **Nettoyage par Expéditeur (One-Click Cleanup)** : Ajouter un bouton "Tout supprimer" ou "Tout archiver" à côté de chaque ligne dans l'onglet "Top Senders".
-- [ ] **Heatmap de l'Inbox** : Afficher une vue calendaire montrant les jours/mois où l'accumulation de mails a été la plus forte pour cibler les périodes à nettoyer.
+- [ ] **Heatmap de l'Inbox (Optionnel - Reporté)** : Afficher une vue calendaire montrant les jours/mois où l'accumulation de mails a été la plus forte pour cibler les périodes à nettoyer.
 
 ## 6. Détection de Redondance dans les Fils (Thread Optimization)
-- [ ] **Dernier message du fil** : Identifier les messages intermédiaires dans un long fil de discussion qui ne contiennent aucune information supplémentaire par rapport au message final.
+- [x] **Dernier message du fil** : Identifier les messages intermédiaires dans un long fil de discussion qui ne contiennent aucune information supplémentaire par rapport au message final.
 
 ## 7. Mode "Zéro-Inbox" Challenge
-- [ ] **Gamification** : Afficher un score de santé de l'inbox et proposer des sessions de "Nettoyage Rapide" de 1 minute où l'utilisateur swipe (gauche/droite) pour jeter ou garder les mails les plus anciens.
+- [x] **Gamification** : Afficher un score de santé de l'inbox et proposer des sessions de "Nettoyage Rapide" de 1 minute où l'utilisateur swipe (gauche/droite) pour jeter ou garder les mails les plus anciens.
 
 ## 8. Confort d'utilisation et Interface
 Améliorer l'espace de travail de l'extension pour plus de visibilité.
