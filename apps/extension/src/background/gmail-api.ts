@@ -166,17 +166,18 @@ export async function getGlobalStats(
 ): Promise<GlobalStats> {
   const now = Date.now();
   
-  // 1. Parallel ID fetching
-  const [unreadIds, heavyIds, oldestIds] = await Promise.all([
+  // 1. Surgical parallel ID fetching, strictly restricted to INBOX
+  // We fetch a bit more for old/heavy to be thorough, but we limit to avoid quota blast
+  const [unreadIds, heavyIds, oldIds] = await Promise.all([
     listAllMessageIds(token, 'in:inbox is:unread'),
-    listAllMessageIds(token, 'has:attachment OR larger:100kb'),
-    listAllMessageIds(token, 'in:inbox').then(ids => ids.reverse().slice(0, 50))
+    listAllMessageIds(token, 'in:inbox (has:attachment OR larger:100kb)'),
+    listAllMessageIds(token, 'in:inbox older_than:1y')
   ]);
 
-  // 2. Mutualize IDs to avoid double fetching metadata
-  const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldestIds]));
+  // 2. Mutualize IDs
+  const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds]));
   
-  // 3. One single crawl
+  // 3. One single crawl of metadata
   const { messages, errorCount } = await fetchAllMetadata(
     token, 
     allIds, 
@@ -191,7 +192,7 @@ export async function getGlobalStats(
 
   const unreadMsgs = getSubSet(unreadIds);
   const heavyMsgs = getSubSet(heavyIds);
-  const oldestMsgs = getSubSet(oldestIds);
+  const oldMsgs = getSubSet(oldIds);
 
   // --- Calculations ---
 
@@ -256,17 +257,16 @@ export async function getGlobalStats(
   for (const m of messages) {
     const subject = getHeader(m, 'Subject') || '';
     const date = new Date(getHeader(m, 'Date') || now).getTime();
-    const isUnread = unreadIds.includes(m.id);
 
     if (otpRegex.test(subject) && (now - date) > 86400000) expiredOTPs.push({ subject, count: 1 });
     if (parcelRegex.test(subject)) parcelNotifications.push({ subject, count: 1 });
     if (inviteRegex.test(subject) && (now - date) > 604800000) pastInvites.push({ subject, count: 1 });
-    // Old: older than 2 years
-    if ((now - date) > (2 * 365 * 86400000)) oldEmails.push({ subject, count: 1 });
+    // Old: older than 1 year (matching our query)
+    if ((now - date) > (365 * 86400000)) oldEmails.push({ subject, count: 1 });
   }
 
-  // E. Oldest for Challenge
-  const oldestEmailsResult = oldestMsgs.map(m => ({
+  // E. Oldest for Challenge (take the last 50 from our 'old' subset)
+  const oldestEmailsResult = oldMsgs.reverse().slice(0, 50).map(m => ({
     subject: getHeader(m, 'Subject') || '(no subject)',
     from: getHeader(m, 'From'),
     sizeEstimate: m.sizeEstimate,
@@ -282,7 +282,7 @@ export async function getGlobalStats(
     oldEmails: { items: oldEmails, totalFetched: oldEmails.length, errorCount },
     pastInvites: { items: pastInvites, totalFetched: pastInvites.length, errorCount },
     redundantThreads: { items: redundantThreads, totalFetched: redundantThreads.length, errorCount },
-    oldestEmails: { items: oldestEmailsResult, totalFetched: oldestMsgs.length, errorCount }
+    oldestEmails: { items: oldestEmailsResult, totalFetched: oldMsgs.length, errorCount }
   };
 }
 

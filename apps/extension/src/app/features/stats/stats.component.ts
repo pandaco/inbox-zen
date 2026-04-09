@@ -107,7 +107,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
             <span class="stats__spinner"></span>
             @if (loadTotal() > 0) {
               <p class="stats__loading-text">
-                {{ loadFetched() }} / {{ loadTotal() }} emails analysed
+                Analyzing {{ loadTotal() }} emails in your Inbox…
               </p>
               <div class="stats__load-bar-bg">
                 <div class="stats__load-bar"
@@ -115,7 +115,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                 </div>
               </div>
             } @else {
-              <p class="stats__loading-text">Fetching inbox data…</p>
+              <p class="stats__loading-text">Scanning Inbox (read & unread)…</p>
             }
           </div>
         } @else if (error()) {
