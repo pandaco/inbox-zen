@@ -4,7 +4,9 @@ export type MessageType =
   | 'GET_AUTH_STATUS'
   | 'GET_TOP_UNREAD_SENDERS'
   | 'GET_TOP_HEAVIEST_EMAILS'
-  | 'GET_TOP_REPEATED_SUBJECTS';
+  | 'GET_TOP_REPEATED_SUBJECTS'
+  | 'GET_EXPIRED_OTPS'
+  | 'GET_PARCEL_NOTIFICATIONS';
 
 export interface SubjectStat {
   subject: string;
@@ -25,6 +27,8 @@ export interface SenderStat {
   sender: string;
   email: string;
   count: number;
+  unsubscribeUrl?: string;
+  score?: number;
 }
 
 export interface SizeStat {

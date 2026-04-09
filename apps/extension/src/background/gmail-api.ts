@@ -178,25 +178,53 @@ export async function getTopUnreadSenders(
 ): Promise<StatsResult<SenderStat>> {
   const ids = await listAllMessageIds(token, 'in:inbox is:unread');
   onProgress?.(0, ids.length);
-  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['From'], onProgress);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['From', 'List-Unsubscribe', 'Date'], onProgress);
 
-  const counts = new Map<string, { name: string; count: number }>();
+  const counts = new Map<string, { name: string; count: number; unsubscribeUrl?: string; firstDate: number; lastDate: number }>();
+  const now = Date.now();
   for (const msg of messages) {
     const from = getHeader(msg, 'From');
     if (!from) continue;
     const { name, email } = parseSender(from);
     if (!email) continue;
+    
+    const dateStr = getHeader(msg, 'Date');
+    const date = dateStr ? new Date(dateStr).getTime() : now;
+
+    const unsub = getHeader(msg, 'List-Unsubscribe');
+    const unsubMatch = unsub?.match(/<(https?:\/\/[^>]+)>/);
+    const unsubscribeUrl = unsubMatch?.[1];
+
     const existing = counts.get(email);
     if (existing) {
       existing.count++;
+      if (!existing.unsubscribeUrl) existing.unsubscribeUrl = unsubscribeUrl;
+      existing.firstDate = Math.min(existing.firstDate, date);
+      existing.lastDate = Math.max(existing.lastDate, date);
     } else {
-      counts.set(email, { name, count: 1 });
+      counts.set(email, { name, count: 1, unsubscribeUrl, firstDate: date, lastDate: date });
     }
   }
 
   const items = [...counts.entries()]
-    .map(([email, { name, count }]) => ({ sender: name || email, email, count }))
-    .sort((a, b) => b.count - a.count);
+    .map(([email, { name, count, unsubscribeUrl, firstDate, lastDate }]) => {
+      // Noise score calculation:
+      // Higher frequency = higher score.
+      // Recency also matters: emails in the last 7 days are weighted more.
+      const daysDiff = Math.max(1, (lastDate - firstDate) / (1000 * 60 * 60 * 24));
+      const frequency = count / daysDiff; // emails per day
+      const isRecent = (now - lastDate) < (7 * 1000 * 60 * 60 * 24);
+      const score = frequency * (isRecent ? 2 : 1) * Math.log10(count + 1);
+
+      return { 
+        sender: name || email, 
+        email, 
+        count, 
+        unsubscribeUrl,
+        score
+      };
+    })
+    .sort((a, b) => b.score - a.score);
 
   return { items, totalFetched: messages.length, errorCount };
 }
@@ -237,6 +265,40 @@ export async function getTopRepeatedSubjects(
   const items = [...counts.entries()]
     .map(([subject, count]) => ({ subject, count }))
     .sort((a, b) => b.count - a.count);
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function getExpiredOTPs(
+  token: string,
+  onProgress?: ProgressCallback,
+): Promise<StatsResult<SubjectStat>> {
+  const query = '(verification OR OTP OR "one-time password" OR code) older_than:1d';
+  const ids = await listAllMessageIds(token, query);
+  onProgress?.(0, ids.length);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject'], onProgress);
+
+  const items = messages.map(m => ({
+    subject: getHeader(m, 'Subject') || '(no subject)',
+    count: 1, // Single occurrence for list
+  }));
+
+  return { items, totalFetched: messages.length, errorCount };
+}
+
+export async function getParcelNotifications(
+  token: string,
+  onProgress?: ProgressCallback,
+): Promise<StatsResult<SubjectStat>> {
+  const query = '(shipping OR delivery OR "colis" OR "livraison" OR "expédition")';
+  const ids = await listAllMessageIds(token, query);
+  onProgress?.(0, ids.length);
+  const { messages, errorCount } = await fetchAllMetadata(token, ids, ['Subject'], onProgress);
+
+  const items = messages.map(m => ({
+    subject: getHeader(m, 'Subject') || '(no subject)',
+    count: 1,
+  }));
 
   return { items, totalFetched: messages.length, errorCount };
 }

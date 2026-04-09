@@ -20,7 +20,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters';
+type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels';
 
 @Component({
   selector: 'app-stats',
@@ -61,6 +61,14 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters';
         <button role="tab" [attr.aria-selected]="activeTab() === 'heaviest'"
           [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
           Heaviest
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'otp'"
+          [class.active]="activeTab() === 'otp'" (click)="setTab('otp')" title="Expired verification codes">
+          OTP
+        </button>
+        <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
+          [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Parcel tracking">
+          Parcels
         </button>
         <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
           [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
@@ -115,6 +123,12 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters';
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.sender }}</span>
+                      @if (item.unsubscribeUrl) {
+                        <button class="chart__unsub" (click)="$event.stopPropagation(); unsubscribe(item)"
+                                title="Unsubscribe from this list">
+                          Unsubscribe
+                        </button>
+                      }
                       <span class="chart__value">{{ item.count }}</span>
                     </div>
                     <div class="chart__bar-bg" role="presentation">
@@ -128,29 +142,29 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters';
               }
             </ol>
           }
-        } @else if (activeTab() === 'repeated') {
-          @if (repeated().length === 0) {
-            <p class="stats__empty">No repeated subjects found.</p>
+        } @else if (activeTab() === 'repeated' || activeTab() === 'otp' || activeTab() === 'parcels') {
+          @if (currentItems().length === 0) {
+            <p class="stats__empty">No items found.</p>
           } @else {
-            <ol class="chart" aria-label="Top subjects by repetition count">
-              @for (item of visibleRepeated(); track item.subject; let i = $index) {
-                <li [class]="item.subject === '(no subject)' ? 'chart__row' : 'chart__row chart__row--clickable'"
-                    [attr.role]="item.subject === '(no subject)' ? null : 'button'"
-                    [attr.tabindex]="item.subject === '(no subject)' ? null : 0"
-                    (click)="item.subject !== '(no subject)' && searchRepeated(item)"
-                    (keydown.enter)="item.subject !== '(no subject)' && searchRepeated(item)"
-                    (keydown.space)="item.subject !== '(no subject)' && searchRepeated(item)"
-                    [title]="item.subject === '(no subject)' ? 'Gmail does not support searching for emails without a subject' : 'Search: ' + item.subject">
+            <ol class="chart" [attr.aria-label]="activeTab()">
+              @for (item of currentItems(); track item.subject + $index; let i = $index) {
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchRepeated(item)"
+                    (keydown.enter)="searchRepeated(item)"
+                    (keydown.space)="searchRepeated(item)"
+                    [title]="'Search: ' + item.subject">
                   <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
-                      <span class="chart__value">{{ item.count }}</span>
+                      @if (activeTab() === 'repeated') {
+                        <span class="chart__value">{{ item.count }}</span>
+                      }
                     </div>
                     <div class="chart__bar-bg" role="presentation">
                       <div class="chart__bar chart__bar--purple"
-                        [style.width.%]="(item.count / repeatedMax()) * 100"
-                        [attr.aria-label]="item.count + ' occurrences'">
+                        [style.width.%]="activeTab() === 'repeated' ? (item.count / (currentMax() || 1)) * 100 : 100">
                       </div>
                     </div>
                   </div>
@@ -357,6 +371,14 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters';
       flex-shrink: 0;
     }
 
+    .chart__unsub {
+      font-size: 0.7rem; color: #5f6368; background: #f1f3f4;
+      border: 1px solid #dadce0; border-radius: 4px;
+      padding: 2px 6px; cursor: pointer; font-weight: 500;
+      margin-left: 0.5rem;
+    }
+    .chart__unsub:hover { background: #e8eaed; color: #202124; }
+
     .chart__bar-bg {
       width: 100%;
       height: 6px;
@@ -432,29 +454,41 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly senders = signal<SenderStat[]>([]);
   protected readonly heaviest = signal<SizeStat[]>([]);
   protected readonly repeated = signal<SubjectStat[]>([]);
+  protected readonly otps = signal<SubjectStat[]>([]);
+  protected readonly parcels = signal<SubjectStat[]>([]);
   protected readonly unreadFetched = signal(0);
   protected readonly unreadErrors = signal(0);
   protected readonly heaviestFetched = signal(0);
   protected readonly heaviestErrors = signal(0);
   protected readonly repeatedFetched = signal(0);
   protected readonly repeatedErrors = signal(0);
+  protected readonly otpFetched = signal(0);
+  protected readonly otpErrors = signal(0);
+  protected readonly parcelsFetched = signal(0);
+  protected readonly parcelsErrors = signal(0);
   protected readonly loadFetched = signal(0);
   protected readonly loadTotal = signal(0);
   protected readonly displayCount = signal(this.PAGE_SIZE);
   protected readonly unreadCachedAt = signal<number | null>(null);
   protected readonly heaviestCachedAt = signal<number | null>(null);
   protected readonly repeatedCachedAt = signal<number | null>(null);
+  protected readonly otpCachedAt = signal<number | null>(null);
+  protected readonly parcelsCachedAt = signal<number | null>(null);
 
   protected readonly totalFetched = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.unreadFetched();
     if (tab === 'repeated') return this.repeatedFetched();
+    if (tab === 'otp') return this.otpFetched();
+    if (tab === 'parcels') return this.parcelsFetched();
     return this.heaviestFetched();
   });
   protected readonly errorCount = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.unreadErrors();
     if (tab === 'repeated') return this.repeatedErrors();
+    if (tab === 'otp') return this.otpErrors();
+    if (tab === 'parcels') return this.parcelsErrors();
     return this.heaviestErrors();
   });
   protected readonly visibleSenders = computed(() =>
@@ -466,18 +500,50 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly visibleRepeated = computed(() =>
     this.repeated().slice(0, this.displayCount()),
   );
+  protected readonly visibleOTPs = computed(() =>
+    this.otps().slice(0, this.displayCount()),
+  );
+  protected readonly visibleParcels = computed(() =>
+    this.parcels().slice(0, this.displayCount()),
+  );
   protected readonly hasMore = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.senders().length > this.displayCount();
     if (tab === 'repeated') return this.repeated().length > this.displayCount();
+    if (tab === 'otp') return this.otps().length > this.displayCount();
+    if (tab === 'parcels') return this.parcels().length > this.displayCount();
     return this.heaviest().length > this.displayCount();
   });
   protected readonly activeCachedAt = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.unreadCachedAt();
     if (tab === 'repeated') return this.repeatedCachedAt();
+    if (tab === 'otp') return this.otpCachedAt();
+    if (tab === 'parcels') return this.parcelsCachedAt();
     return this.heaviestCachedAt();
   });
+
+  protected readonly otpMax = computed(() =>
+    Math.max(1, ...this.otps().map((s) => s.count)),
+  );
+  protected readonly parcelsMax = computed(() =>
+    Math.max(1, ...this.parcels().map((s) => s.count)),
+  );
+
+  protected readonly currentItems = computed(() => {
+    const tab = this.activeTab();
+    if (tab === 'otp') return this.visibleOTPs();
+    if (tab === 'parcels') return this.visibleParcels();
+    return this.visibleRepeated();
+  });
+
+  protected readonly currentMax = computed(() => {
+    const tab = this.activeTab();
+    if (tab === 'otp') return this.otpMax();
+    if (tab === 'parcels') return this.parcelsMax();
+    return this.repeatedMax();
+  });
+
   // true when data came from cache (not a live fetch just performed)
   protected readonly isFromCache = computed(() => {
     const ts = this.activeCachedAt();
@@ -545,6 +611,12 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.gmailSearch.search(query);
   }
 
+  protected unsubscribe(item: SenderStat): void {
+    if (item.unsubscribeUrl) {
+      window.open(item.unsubscribeUrl, '_blank');
+    }
+  }
+
   protected load(forceRefresh = false): void {
     this.isLoading.set(true);
     this.error.set(null);
@@ -554,25 +626,34 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.heaviestErrors.set(0);
     this.repeatedFetched.set(0);
     this.repeatedErrors.set(0);
+    this.otpFetched.set(0);
+    this.otpErrors.set(0);
+    this.parcelsFetched.set(0);
+    this.parcelsErrors.set(0);
     this.loadFetched.set(0);
     this.loadTotal.set(0);
     this.displayCount.set(this.PAGE_SIZE);
+
     if (forceRefresh) {
       this.unreadCachedAt.set(null);
       this.heaviestCachedAt.set(null);
       this.repeatedCachedAt.set(null);
+      this.otpCachedAt.set(null);
+      this.parcelsCachedAt.set(null);
     }
 
-    let done = 0;
+    let completed = 0;
+    const TOTAL_STREAMS = 5;
 
     const checkDone = (err?: string): void => {
-      if (++done < 3) return;
-      this.isLoading.set(false);
       if (err) this.error.set(err);
+      if (++completed === TOTAL_STREAMS) {
+        this.isLoading.set(false);
+      }
     };
 
     const onSessionExpired = (): void => {
-      this.auth.isAuthenticated.set(false);
+      this.auth.logout();
       this.router.navigate(['/auth']);
     };
 
@@ -581,7 +662,7 @@ export class StatsComponent implements OnInit, OnDestroy {
         if (msg.type === 'PROGRESS') {
           this.loadFetched.set(msg.fetched);
           this.loadTotal.set(msg.total);
-        } else {
+        } else if (msg.type === 'RESULT') {
           if (!msg.success) {
             if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
             checkDone(msg.error);
@@ -632,8 +713,43 @@ export class StatsComponent implements OnInit, OnDestroy {
       },
       error: () => checkDone('Unexpected error'),
     });
-  }
 
+    this.statsService.streamExpiredOTPs(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.otps.set(msg.data.items);
+            this.otpFetched.set(msg.data.totalFetched);
+            this.otpErrors.set(msg.data.errorCount);
+            this.otpCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+
+    this.statsService.streamParcelNotifications(forceRefresh).subscribe({
+      next: (msg) => {
+        if (msg.type === 'RESULT') {
+          if (!msg.success) {
+            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
+            checkDone(msg.error);
+          } else if (msg.data) {
+            this.parcels.set(msg.data.items);
+            this.parcelsFetched.set(msg.data.totalFetched);
+            this.parcelsErrors.set(msg.data.errorCount);
+            this.parcelsCachedAt.set(msg.cachedAt ?? Date.now());
+            checkDone();
+          }
+        }
+      },
+      error: () => checkDone('Unexpected error'),
+    });
+  }
   openInNewTab() {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
       chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
