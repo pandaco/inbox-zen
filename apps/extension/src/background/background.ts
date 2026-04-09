@@ -1,9 +1,5 @@
-import { 
-  getTopUnreadSenders, getTopHeaviestEmails, getTopRepeatedSubjects, 
-  getExpiredOTPs, getParcelNotifications, getOldEmails, getPastCalendarInvites, 
-  deleteEmailsByQuery, getRedundantThreads, getOldestEmails, deleteMessage
-} from './gmail-api';
-import type { BgMessage, BgResponse, PortMessage, StatsResult, SenderStat, SizeStat, SubjectStat } from '../shared/types';
+import { getGlobalStats, deleteEmailsByQuery, deleteMessage } from './gmail-api';
+import type { BgMessage, BgResponse, PortMessage, GlobalStats, SenderStat, SizeStat, SubjectStat } from '../shared/types';
 
 export type { BgMessage, BgResponse };
 export type { MessageType } from '../shared/types';
@@ -14,34 +10,22 @@ const SCOPES = [
 
 const TOKEN_KEY = 'gmail_access_token';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const CACHE_KEYS = {
-  GET_TOP_UNREAD_SENDERS: 'cache_unread_senders',
-  GET_TOP_HEAVIEST_EMAILS: 'cache_heaviest_emails',
-  GET_TOP_REPEATED_SUBJECTS: 'cache_repeated_subjects',
-  GET_EXPIRED_OTPS: 'cache_expired_otps',
-  GET_PARCEL_NOTIFICATIONS: 'cache_parcel_notifications',
-  GET_OLD_EMAILS: 'cache_old_emails',
-  GET_PAST_INVITES: 'cache_past_invites',
-  GET_REDUNDANT_THREADS: 'cache_redundant_threads',
-  GET_OLDEST_EMAILS: 'cache_oldest_emails',
-} as const;
+const CACHE_KEY = 'cache_global_stats';
 
-type CachedPortName = keyof typeof CACHE_KEYS;
-
-interface CacheEntry<T> {
-  result: StatsResult<T>;
+interface CacheEntry {
+  result: GlobalStats;
   cachedAt: number;
 }
 
-async function getCached<T>(key: string): Promise<CacheEntry<T> | null> {
-  const r = await chrome.storage.local.get(key);
-  const entry = r[key] as CacheEntry<T> | undefined;
+async function getCached(): Promise<CacheEntry | null> {
+  const r = await chrome.storage.local.get(CACHE_KEY);
+  const entry = r[CACHE_KEY] as CacheEntry | undefined;
   if (!entry || Date.now() - entry.cachedAt > CACHE_TTL_MS) return null;
   return entry;
 }
 
-async function setCached<T>(key: string, result: StatsResult<T>): Promise<void> {
-  await chrome.storage.local.set({ [key]: { result, cachedAt: Date.now() } });
+async function setCached(result: GlobalStats): Promise<void> {
+  await chrome.storage.local.set({ [CACHE_KEY]: { result, cachedAt: Date.now() } });
 }
 
 async function getManifestClientId(): Promise<string> {
@@ -193,12 +177,9 @@ chrome.runtime.onConnect.addListener((port) => {
   const [baseName, flag] = port.name.split(':') as [string, string | undefined];
   const forceRefresh = flag === 'refresh';
 
-  if (!(baseName in CACHE_KEYS)) return;
+  if (baseName !== 'GET_GLOBAL_STATS') return;
 
-  const portName = baseName as CachedPortName;
-  const cacheKey = CACHE_KEYS[portName];
-
-  const send = <T>(msg: PortMessage<T>): void => {
+  const send = (msg: PortMessage<GlobalStats>): void => {
     try { port.postMessage(msg); } catch { /* port disconnected */ }
   };
 
@@ -209,7 +190,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     if (!forceRefresh) {
-      const cached = await getCached<any>(cacheKey);
+      const cached = await getCached();
       if (cached) {
         send({ type: 'RESULT', success: true, data: cached.result, cachedAt: cached.cachedAt });
         return;
@@ -219,24 +200,10 @@ chrome.runtime.onConnect.addListener((port) => {
     const onProgress = (fetched: number, total: number): void =>
       send({ type: 'PROGRESS', fetched, total });
 
-    let promise: Promise<StatsResult<any>>;
-    switch (portName) {
-      case 'GET_TOP_UNREAD_SENDERS': promise = getTopUnreadSenders(token, onProgress); break;
-      case 'GET_TOP_HEAVIEST_EMAILS': promise = getTopHeaviestEmails(token, onProgress); break;
-      case 'GET_TOP_REPEATED_SUBJECTS': promise = getTopRepeatedSubjects(token, onProgress); break;
-      case 'GET_EXPIRED_OTPS': promise = getExpiredOTPs(token, onProgress); break;
-      case 'GET_PARCEL_NOTIFICATIONS': promise = getParcelNotifications(token, onProgress); break;
-      case 'GET_OLD_EMAILS': promise = getOldEmails(token, onProgress); break;
-      case 'GET_PAST_INVITES': promise = getPastCalendarInvites(token, onProgress); break;
-      case 'GET_REDUNDANT_THREADS': promise = getRedundantThreads(token, onProgress); break;
-      case 'GET_OLDEST_EMAILS': promise = getOldestEmails(token); break;
-      default: return;
-    }
-
-    promise
+    getGlobalStats(token, onProgress)
       .then(async data => {
         const cachedAt = Date.now();
-        await setCached(cacheKey, data);
+        await setCached(data);
         send({ type: 'RESULT', success: true, data, cachedAt });
       })
       .catch((err: unknown) => {

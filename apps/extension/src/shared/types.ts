@@ -11,8 +11,21 @@ export type MessageType =
   | 'GET_PAST_INVITES'
   | 'GET_REDUNDANT_THREADS'
   | 'GET_OLDEST_EMAILS'
+  | 'GET_GLOBAL_STATS'
   | 'DELETE_EMAILS_BY_QUERY'
   | 'DELETE_MESSAGE';
+
+export interface GlobalStats {
+  unreadSenders: StatsResult<SenderStat>;
+  heaviestEmails: StatsResult<SizeStat>;
+  repeatedSubjects: StatsResult<SubjectStat>;
+  expiredOTPs: StatsResult<SubjectStat>;
+  parcelNotifications: StatsResult<SubjectStat>;
+  oldEmails: StatsResult<SubjectStat>;
+  pastInvites: StatsResult<SubjectStat>;
+  redundantThreads: StatsResult<SubjectStat>;
+  oldestEmails: StatsResult<SizeStat>;
+}
 
 export interface SubjectStat {
   subject: string;

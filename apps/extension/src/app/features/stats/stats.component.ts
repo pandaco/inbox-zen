@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, effect, inject, signal, computed, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { StatsService, SenderStat, SizeStat, SubjectStat } from './stats.service';
+import { StatsService, SenderStat, SizeStat, SubjectStat, GlobalStats } from './stats.service';
 import { GmailSearchService } from '../../core/gmail-search/gmail-search.service';
 
 function formatSize(bytes: number): string {
@@ -115,7 +115,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                 </div>
               </div>
             } @else {
-              <p class="stats__loading-text">Fetching unread emails…</p>
+              <p class="stats__loading-text">Fetching inbox data…</p>
             }
           </div>
         } @else if (error()) {
@@ -124,7 +124,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
             <button class="stats__retry" (click)="load(true)">Retry</button>
           </div>
         } @else if (activeTab() === 'unread') {
-          @if (senders().length === 0) {
+          @if (visibleSenders().length === 0) {
             <p class="stats__empty">No unread emails found.</p>
           } @else {
             <ol class="chart" aria-label="Top senders by unread email count">
@@ -162,42 +162,12 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
               }
             </ol>
           }
-        } @else if (activeTab() === 'repeated' || activeTab() === 'otp' || activeTab() === 'parcels') {
-          @if (currentItems().length === 0) {
-            <p class="stats__empty">No items found.</p>
-          } @else {
-            <ol class="chart" [attr.aria-label]="activeTab()">
-              @for (item of currentItems(); track item.subject + $index; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchRepeated(item)"
-                    (keydown.enter)="searchRepeated(item)"
-                    (keydown.space)="searchRepeated(item)"
-                    [title]="'Search: ' + item.subject">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                      @if (activeTab() === 'repeated') {
-                        <span class="chart__value">{{ item.count }}</span>
-                      }
-                    </div>
-                    <div class="chart__bar-bg" role="presentation">
-                      <div class="chart__bar chart__bar--purple"
-                        [style.width.%]="activeTab() === 'repeated' ? (item.count / (currentMax() || 1)) * 100 : 100">
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
         } @else if (activeTab() === 'heaviest') {
-          @if (heaviest().length === 0) {
+          @if (visibleHeaviest().length === 0) {
             <p class="stats__empty">No heavy emails found.</p>
           } @else {
             <ol class="chart" aria-label="Top emails by size">
-              @for (item of visibleHeaviest(); track item.subject + item.from; let i = $index) {
+              @for (item of visibleHeaviest(); track item.subject + item.from + $index; let i = $index) {
                 <li class="chart__row chart__row--clickable"
                     role="button" tabindex="0"
                     (click)="searchHeaviest(item)"
@@ -220,8 +190,38 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                 </li>
               }
             </ol>
-            }
-            } @else if (activeTab() === 'challenge') {
+          }
+        } @else if (activeTab() === 'repeated' || activeTab() === 'otp' || activeTab() === 'parcels' || activeTab() === 'old' || activeTab() === 'invites' || activeTab() === 'redundant') {
+          @if (currentItems().length === 0) {
+            <p class="stats__empty">No items found.</p>
+          } @else {
+            <ol class="chart" [attr.aria-label]="activeTab()">
+              @for (item of currentItems(); track item.subject + $index; let i = $index) {
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchRepeated(item)"
+                    (keydown.enter)="searchRepeated(item)"
+                    (keydown.space)="searchRepeated(item)"
+                    [title]="'Search: ' + item.subject">
+                  <span class="chart__rank">{{ i + 1 }}</span>
+                  <div class="chart__info">
+                    <div class="chart__label-row">
+                      <span class="chart__name">{{ item.subject }}</span>
+                      @if (activeTab() === 'repeated' || activeTab() === 'redundant') {
+                        <span class="chart__value">{{ item.count }}</span>
+                      }
+                    </div>
+                    <div class="chart__bar-bg" role="presentation">
+                      <div class="chart__bar chart__bar--purple"
+                        [style.width.%]="(activeTab() === 'repeated' || activeTab() === 'redundant') ? (item.count / (currentMax() || 1)) * 100 : 100">
+                      </div>
+                    </div>
+                  </div>
+                </li>
+              }
+            </ol>
+          }
+        } @else if (activeTab() === 'challenge') {
           <div class="challenge">
             @if (!challengeCurrent()) {
               <p class="stats__empty">Challenge completed! No more old emails in inbox. 🎉</p>
@@ -238,16 +238,17 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
             }
           </div>
         } @else if (activeTab() === 'filters') {
-            <div class="filters">
+          <div class="filters">
             <p class="filters__desc">Quick searches to clean up your inbox.</p>
             <ul class="filters__list">
-            <li><button class="filters__btn" (click)="searchFilter('newsletter')">Newsletters</button></li>
-            <li><button class="filters__btn" (click)="searchFilter('unsubscribe OR &quot;se désinscrire&quot; OR &quot;se désabonner&quot;')">Unsubscribe links</button></li>
+              <li><button class="filters__btn" (click)="searchFilter('newsletter')">Newsletters</button></li>
+              <li><button class="filters__btn" (click)="searchFilter('unsubscribe OR &quot;se désinscrire&quot; OR &quot;se désabonner&quot;')">Unsubscribe links</button></li>
             </ul>
-            </div>
-            }
-            @if (hasMore() && activeTab() !== 'filters') {
-            <div #sentinel class="stats__sentinel" aria-hidden="true"></div>        }
+          </div>
+        }
+        @if (hasMore() && activeTab() !== 'filters' && activeTab() !== 'challenge') {
+          <div #sentinel class="stats__sentinel" aria-hidden="true"></div>
+        }
       </div>
 
       <footer class="stats__footer">
@@ -298,11 +299,17 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
     .stats__tabs {
       display: flex;
       border-bottom: 1px solid #e0e0e0;
+      overflow-x: auto;
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* IE/Edge */
     }
+    .stats__tabs::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+
     .stats__tabs button {
-      flex: 1; padding: 0.7rem; border: none; background: transparent;
+      flex: 0 0 auto; padding: 0.7rem 1rem; border: none; background: transparent;
       font-size: 0.85rem; font-weight: 500; color: #5f6368; cursor: pointer;
       border-bottom: 2px solid transparent; font-family: inherit;
+      white-space: nowrap;
     }
     .stats__tabs button.active { color: #1a73e8; border-bottom-color: #1a73e8; }
 
@@ -516,95 +523,62 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly activeTab = signal<Tab>('unread');
   protected readonly isLoading = signal(false);
   protected readonly error = signal<string | null>(null);
-  protected readonly senders = signal<SenderStat[]>([]);
-  protected readonly heaviest = signal<SizeStat[]>([]);
-  protected readonly repeated = signal<SubjectStat[]>([]);
-  protected readonly otps = signal<SubjectStat[]>([]);
-  protected readonly parcels = signal<SubjectStat[]>([]);
-  protected readonly oldEmails = signal<SubjectStat[]>([]);
-  protected readonly pastInvites = signal<SubjectStat[]>([]);
-  protected readonly redundantThreads = signal<SubjectStat[]>([]);
-  protected readonly oldestEmails = signal<SizeStat[]>([]);
-  protected readonly unreadFetched = signal(0);
-  protected readonly unreadErrors = signal(0);
-  protected readonly heaviestFetched = signal(0);
-  protected readonly heaviestErrors = signal(0);
-  protected readonly repeatedFetched = signal(0);
-  protected readonly repeatedErrors = signal(0);
-  protected readonly otpFetched = signal(0);
-  protected readonly otpErrors = signal(0);
-  protected readonly parcelsFetched = signal(0);
-  protected readonly parcelsErrors = signal(0);
-  protected readonly oldFetched = signal(0);
-  protected readonly oldErrors = signal(0);
-  protected readonly invitesFetched = signal(0);
-  protected readonly invitesErrors = signal(0);
-  protected readonly redundantFetched = signal(0);
-  protected readonly redundantErrors = signal(0);
-  protected readonly challengeFetched = signal(0);
-  protected readonly challengeErrors = signal(0);
   protected readonly loadFetched = signal(0);
   protected readonly loadTotal = signal(0);
+
   protected readonly displayCount = signal(this.PAGE_SIZE);
-  protected readonly unreadCachedAt = signal<number | null>(null);
-  protected readonly heaviestCachedAt = signal<number | null>(null);
-  protected readonly repeatedCachedAt = signal<number | null>(null);
-  protected readonly otpCachedAt = signal<number | null>(null);
-  protected readonly parcelsCachedAt = signal<number | null>(null);
-  protected readonly oldCachedAt = signal<number | null>(null);
-  protected readonly invitesCachedAt = signal<number | null>(null);
-  protected readonly redundantCachedAt = signal<number | null>(null);
-  protected readonly challengeCachedAt = signal<number | null>(null);
+  protected readonly globalCachedAt = signal<number | null>(null);
+  protected readonly stats = signal<GlobalStats | null>(null);
+
+  protected readonly senders = computed(() => this.stats()?.unreadSenders.items ?? []);
+  protected readonly heaviest = computed(() => this.stats()?.heaviestEmails.items ?? []);
+  protected readonly repeated = computed(() => this.stats()?.repeatedSubjects.items ?? []);
+  protected readonly otps = computed(() => this.stats()?.expiredOTPs.items ?? []);
+  protected readonly parcels = computed(() => this.stats()?.parcelNotifications.items ?? []);
+  protected readonly oldEmails = computed(() => this.stats()?.oldEmails.items ?? []);
+  protected readonly pastInvites = computed(() => this.stats()?.pastInvites.items ?? []);
+  protected readonly redundantThreads = computed(() => this.stats()?.redundantThreads.items ?? []);
+  protected readonly oldestEmails = signal<SizeStat[]>([]); // Keep as signal for local updates in challenge
 
   protected readonly totalFetched = computed(() => {
     const tab = this.activeTab();
-    if (tab === 'unread') return this.unreadFetched();
-    if (tab === 'repeated') return this.repeatedFetched();
-    if (tab === 'otp') return this.otpFetched();
-    if (tab === 'parcels') return this.parcelsFetched();
-    if (tab === 'old') return this.oldFetched();
-    if (tab === 'invites') return this.invitesFetched();
-    if (tab === 'redundant') return this.redundantFetched();
-    if (tab === 'challenge') return this.challengeFetched();
-    return this.heaviestFetched();
+    const s = this.stats();
+    if (!s) return 0;
+    if (tab === 'unread') return s.unreadSenders.totalFetched;
+    if (tab === 'repeated') return s.repeatedSubjects.totalFetched;
+    if (tab === 'otp') return s.expiredOTPs.totalFetched;
+    if (tab === 'parcels') return s.parcelNotifications.totalFetched;
+    if (tab === 'old') return s.oldEmails.totalFetched;
+    if (tab === 'invites') return s.pastInvites.totalFetched;
+    if (tab === 'redundant') return s.redundantThreads.totalFetched;
+    if (tab === 'challenge') return s.oldestEmails.totalFetched;
+    return s.heaviestEmails.totalFetched;
   });
+
   protected readonly errorCount = computed(() => {
     const tab = this.activeTab();
-    if (tab === 'unread') return this.unreadErrors();
-    if (tab === 'repeated') return this.repeatedErrors();
-    if (tab === 'otp') return this.otpErrors();
-    if (tab === 'parcels') return this.parcelsErrors();
-    if (tab === 'old') return this.oldErrors();
-    if (tab === 'invites') return this.invitesErrors();
-    if (tab === 'redundant') return this.redundantErrors();
-    if (tab === 'challenge') return this.challengeErrors();
-    return this.heaviestErrors();
+    const s = this.stats();
+    if (!s) return 0;
+    if (tab === 'unread') return s.unreadSenders.errorCount;
+    if (tab === 'repeated') return s.repeatedSubjects.errorCount;
+    if (tab === 'otp') return s.expiredOTPs.errorCount;
+    if (tab === 'parcels') return s.parcelNotifications.errorCount;
+    if (tab === 'old') return s.oldEmails.errorCount;
+    if (tab === 'invites') return s.pastInvites.errorCount;
+    if (tab === 'redundant') return s.redundantThreads.errorCount;
+    if (tab === 'challenge') return s.oldestEmails.errorCount;
+    return s.heaviestEmails.errorCount;
   });
-  protected readonly visibleSenders = computed(() =>
-    this.senders().slice(0, this.displayCount()),
-  );
-  protected readonly visibleHeaviest = computed(() =>
-    this.heaviest().slice(0, this.displayCount()),
-  );
-  protected readonly visibleRepeated = computed(() =>
-    this.repeated().slice(0, this.displayCount()),
-  );
-  protected readonly visibleOTPs = computed(() =>
-    this.otps().slice(0, this.displayCount()),
-  );
-  protected readonly visibleParcels = computed(() =>
-    this.parcels().slice(0, this.displayCount()),
-  );
-  protected readonly visibleOld = computed(() =>
-    this.oldEmails().slice(0, this.displayCount()),
-  );
-  protected readonly visibleInvites = computed(() =>
-    this.pastInvites().slice(0, this.displayCount()),
-  );
 
-  protected readonly visibleRedundant = computed(() =>
-    this.redundantThreads().slice(0, this.displayCount()),
-  );
+  protected readonly visibleSenders = computed(() => this.senders().slice(0, this.displayCount()));
+  protected readonly visibleHeaviest = computed(() => this.heaviest().slice(0, this.displayCount()));
+  protected readonly visibleRepeated = computed(() => this.repeated().slice(0, this.displayCount()));
+  protected readonly visibleOTPs = computed(() => this.otps().slice(0, this.displayCount()));
+  protected readonly visibleParcels = computed(() => this.parcels().slice(0, this.displayCount()));
+  protected readonly visibleOld = computed(() => this.oldEmails().slice(0, this.displayCount()));
+  protected readonly visibleInvites = computed(() => this.pastInvites().slice(0, this.displayCount()));
+  protected readonly visibleRedundant = computed(() => this.redundantThreads().slice(0, this.displayCount()));
+
   protected readonly hasMore = computed(() => {
     const tab = this.activeTab();
     if (tab === 'unread') return this.senders().length > this.displayCount();
@@ -617,35 +591,17 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (tab === 'challenge') return false;
     return this.heaviest().length > this.displayCount();
   });
-  protected readonly activeCachedAt = computed(() => {
-    const tab = this.activeTab();
-    if (tab === 'unread') return this.unreadCachedAt();
-    if (tab === 'repeated') return this.repeatedCachedAt();
-    if (tab === 'otp') return this.otpCachedAt();
-    if (tab === 'parcels') return this.parcelsCachedAt();
-    if (tab === 'old') return this.oldCachedAt();
-    if (tab === 'invites') return this.invitesCachedAt();
-    if (tab === 'redundant') return this.redundantCachedAt();
-    if (tab === 'challenge') return this.challengeCachedAt();
-    return this.heaviestCachedAt();
-  });
 
-  protected readonly otpMax = computed(() =>
-    Math.max(1, ...this.otps().map((s) => s.count)),
-  );
-  protected readonly parcelsMax = computed(() =>
-    Math.max(1, ...this.parcels().map((s) => s.count)),
-  );
-  protected readonly oldMax = computed(() =>
-    Math.max(1, ...this.oldEmails().map((s) => s.count)),
-  );
-  protected readonly invitesMax = computed(() =>
-    Math.max(1, ...this.pastInvites().map((s) => s.count)),
-  );
+  protected readonly activeCachedAt = computed(() => this.globalCachedAt());
 
-  protected readonly redundantMax = computed(() =>
-    Math.max(1, ...this.redundantThreads().map((s) => s.count)),
-  );
+  protected readonly otpMax = computed(() => Math.max(1, ...this.otps().map((s) => s.count)));
+  protected readonly parcelsMax = computed(() => Math.max(1, ...this.parcels().map((s) => s.count)));
+  protected readonly oldMax = computed(() => Math.max(1, ...this.oldEmails().map((s) => s.count)));
+  protected readonly invitesMax = computed(() => Math.max(1, ...this.pastInvites().map((s) => s.count)));
+  protected readonly redundantMax = computed(() => Math.max(1, ...this.redundantThreads().map((s) => s.count)));
+  protected readonly sendersMax = computed(() => Math.max(1, ...this.senders().map((s) => s.count)));
+  protected readonly heaviestMax = computed(() => Math.max(1, ...this.heaviest().map((h) => h.sizeEstimate)));
+  protected readonly repeatedMax = computed(() => Math.max(1, ...this.repeated().map((s) => s.count)));
 
   protected readonly currentItems = computed(() => {
     const tab = this.activeTab();
@@ -675,18 +631,8 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly isFromCache = computed(() => {
     const ts = this.activeCachedAt();
     if (ts === null) return false;
-    return Date.now() - ts > 5_000; // older than 5s → was cached before this session
+    return Date.now() - ts > 5_000;
   });
-
-  protected readonly sendersMax = computed(() =>
-    Math.max(1, ...this.senders().map((s) => s.count)),
-  );
-  protected readonly heaviestMax = computed(() =>
-    Math.max(1, ...this.heaviest().map((h) => h.sizeEstimate)),
-  );
-  protected readonly repeatedMax = computed(() =>
-    Math.max(1, ...this.repeated().map((s) => s.count)),
-  );
 
   protected readonly formatSize = formatSize;
   protected readonly formatTimeAgo = formatTimeAgo;
@@ -781,220 +727,42 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected load(forceRefresh = false): void {
     this.isLoading.set(true);
     this.error.set(null);
-    this.unreadFetched.set(0);
-    this.unreadErrors.set(0);
-    this.heaviestFetched.set(0);
-    this.heaviestErrors.set(0);
-    this.repeatedFetched.set(0);
-    this.repeatedErrors.set(0);
-    this.otpFetched.set(0);
-    this.otpErrors.set(0);
-    this.parcelsFetched.set(0);
-    this.parcelsErrors.set(0);
-    this.oldFetched.set(0);
-    this.oldErrors.set(0);
-    this.invitesFetched.set(0);
-    this.invitesErrors.set(0);
-    this.redundantFetched.set(0);
-    this.redundantErrors.set(0);
-    this.challengeFetched.set(0);
-    this.challengeErrors.set(0);
     this.loadFetched.set(0);
     this.loadTotal.set(0);
     this.displayCount.set(this.PAGE_SIZE);
 
     if (forceRefresh) {
-      this.unreadCachedAt.set(null);
-      this.heaviestCachedAt.set(null);
-      this.repeatedCachedAt.set(null);
-      this.otpCachedAt.set(null);
-      this.parcelsCachedAt.set(null);
-      this.oldCachedAt.set(null);
-      this.invitesCachedAt.set(null);
-      this.redundantCachedAt.set(null);
-      this.challengeCachedAt.set(null);
+      this.globalCachedAt.set(null);
     }
 
-    let completed = 0;
-    const TOTAL_STREAMS = 9;
-
-    const checkDone = (err?: string): void => {
-      if (err) this.error.set(err);
-      if (++completed === TOTAL_STREAMS) {
-        this.isLoading.set(false);
-      }
-    };
-
-    const onSessionExpired = (): void => {
-      this.auth.logout();
-      this.router.navigate(['/auth']);
-    };
-
-    this.statsService.streamUnreadSenders(forceRefresh).subscribe({
+    this.statsService.streamGlobalStats(forceRefresh).subscribe({
       next: (msg) => {
         if (msg.type === 'PROGRESS') {
           this.loadFetched.set(msg.fetched);
           this.loadTotal.set(msg.total);
         } else if (msg.type === 'RESULT') {
+          this.isLoading.set(false);
           if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
+            if (msg.error === 'SESSION_EXPIRED') {
+              this.auth.logout();
+              this.router.navigate(['/auth']);
+              return;
+            }
+            this.error.set(msg.error || 'Unknown error');
           } else if (msg.data) {
-            this.senders.set(msg.data.items);
-            this.unreadFetched.set(msg.data.totalFetched);
-            this.unreadErrors.set(msg.data.errorCount);
-            this.unreadCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
+            this.stats.set(msg.data);
+            this.oldestEmails.set(msg.data.oldestEmails.items);
+            this.globalCachedAt.set(msg.cachedAt ?? Date.now());
           }
         }
       },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamHeaviestEmails(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.heaviest.set(msg.data.items);
-            this.heaviestFetched.set(msg.data.totalFetched);
-            this.heaviestErrors.set(msg.data.errorCount);
-            this.heaviestCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
+      error: () => {
+        this.isLoading.set(false);
+        this.error.set('Unexpected error');
       },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamRepeatedSubjects(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.repeated.set(msg.data.items);
-            this.repeatedFetched.set(msg.data.totalFetched);
-            this.repeatedErrors.set(msg.data.errorCount);
-            this.repeatedCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamExpiredOTPs(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.otps.set(msg.data.items);
-            this.otpFetched.set(msg.data.totalFetched);
-            this.otpErrors.set(msg.data.errorCount);
-            this.otpCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamParcelNotifications(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.parcels.set(msg.data.items);
-            this.parcelsFetched.set(msg.data.totalFetched);
-            this.parcelsErrors.set(msg.data.errorCount);
-            this.parcelsCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamOldEmails(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.oldEmails.set(msg.data.items);
-            this.oldFetched.set(msg.data.totalFetched);
-            this.oldErrors.set(msg.data.errorCount);
-            this.oldCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamPastInvites(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.pastInvites.set(msg.data.items);
-            this.invitesFetched.set(msg.data.totalFetched);
-            this.invitesErrors.set(msg.data.errorCount);
-            this.invitesCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamRedundantThreads(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.redundantThreads.set(msg.data.items);
-            this.redundantFetched.set(msg.data.totalFetched);
-            this.redundantErrors.set(msg.data.errorCount);
-            this.redundantCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
-    });
-
-    this.statsService.streamOldestEmails(forceRefresh).subscribe({
-      next: (msg) => {
-        if (msg.type === 'RESULT') {
-          if (!msg.success) {
-            if (msg.error === 'SESSION_EXPIRED') { onSessionExpired(); return; }
-            checkDone(msg.error);
-          } else if (msg.data) {
-            this.oldestEmails.set(msg.data.items);
-            this.challengeFetched.set(msg.data.totalFetched);
-            this.challengeErrors.set(msg.data.errorCount);
-            this.challengeCachedAt.set(msg.cachedAt ?? Date.now());
-            checkDone();
-          }
-        }
-      },
-      error: () => checkDone('Unexpected error'),
     });
   }
+
   openInNewTab() {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
       chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
