@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ChromeMessagingService } from '../../core/messaging/chrome-messaging.service';
-import type { SenderStat, SizeStat, SubjectStat, GlobalStats, PortMessage, BgResponse } from '../../../shared/types';
+import type { SenderStat, SizeStat, SubjectStat, GlobalStats, QuickFilter, PortMessage, BgResponse } from '../../../shared/types';
 
-export type { SenderStat, SizeStat, SubjectStat, GlobalStats, PortMessage, BgResponse };
+export type { SenderStat, SizeStat, SubjectStat, GlobalStats, QuickFilter, PortMessage, BgResponse };
 
 @Injectable({ providedIn: 'root' })
 export class StatsService {

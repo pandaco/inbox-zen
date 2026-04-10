@@ -32,6 +32,12 @@ export interface SubjectStat {
   count: number;
 }
 
+export interface QuickFilter {
+  id: string;
+  label: string;
+  query: string;
+}
+
 export interface BgMessage {
   type: MessageType;
 }

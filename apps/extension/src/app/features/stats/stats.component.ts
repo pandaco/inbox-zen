@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, effect, inject, signal, computed, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { StatsService, SenderStat, SizeStat, SubjectStat, GlobalStats } from './stats.service';
+import { StatsService, SenderStat, SizeStat, SubjectStat, GlobalStats, QuickFilter } from './stats.service';
 import { GmailSearchService } from '../../core/gmail-search/gmail-search.service';
 
 function formatSize(bytes: number): string {
@@ -239,9 +239,41 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
           <div class="filters">
             <p class="filters__desc">Quick searches to clean up your inbox.</p>
             <ul class="filters__list">
-              <li><button class="filters__btn" (click)="searchFilter('newsletter')">Newsletters</button></li>
-              <li><button class="filters__btn" (click)="searchFilter('unsubscribe OR &quot;se désinscrire&quot; OR &quot;se désabonner&quot;')">Unsubscribe links</button></li>
+              @for (f of customFilters(); track f.id) {
+                <li class="filters__item">
+                  <button class="filters__btn" (click)="searchFilter(f.query)">{{ f.label }}</button>
+                  <button class="filters__icon-btn" (click)="startEditFilter(f)" title="Edit">✏️</button>
+                  <button class="filters__icon-btn filters__icon-btn--delete" (click)="deleteFilter(f.id)" title="Delete">🗑️</button>
+                </li>
+              }
             </ul>
+
+            @if (!isAddingFilter() && !editingFilter()) {
+              <button class="filters__add-btn" (click)="startAddFilter()">+ Add a personalized filter</button>
+            }
+
+            @if (isAddingFilter() || editingFilter()) {
+              <div class="filters__form">
+                <h3 class="filters__form-title">{{ editingFilter() ? 'Edit Filter' : 'New Filter' }}</h3>
+                
+                <div class="filters__form-field">
+                  <label class="filters__form-label" for="filter-label">Name</label>
+                  <input type="text" id="filter-label" class="filters__form-input" placeholder="e.g. My Newsletters" 
+                         [value]="formLabel()" (input)="setFormLabel($any($event.target).value)">
+                </div>
+
+                <div class="filters__form-field">
+                  <label class="filters__form-label" for="filter-query">Gmail Query</label>
+                  <input type="text" id="filter-query" class="filters__form-input" placeholder="e.g. from:me to:me"
+                         [value]="formQuery()" (input)="setFormQuery($any($event.target).value)">
+                </div>
+
+                <div class="filters__form-actions">
+                  <button class="filters__form-btn filters__form-btn--cancel" (click)="cancelFilterForm()">Cancel</button>
+                  <button class="filters__form-btn filters__form-btn--save" (click)="saveFilterForm()">Save</button>
+                </div>
+              </div>
+            }
           </div>
         }
         @if (hasMore() && activeTab() !== 'filters' && activeTab() !== 'challenge') {
@@ -477,13 +509,55 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
     .filters { padding: 1rem 1.2rem; }
     .filters__desc { font-size: 0.85rem; color: #5f6368; margin-bottom: 1rem; }
     .filters__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+    .filters__item {
+      display: flex; gap: 0.5rem; align-items: stretch;
+    }
     .filters__btn {
-      width: 100%; padding: 0.6rem 1rem; text-align: left;
+      flex: 1; padding: 0.6rem 1rem; text-align: left;
       background: #f8f9fa; border: 1px solid #dadce0; border-radius: 6px;
       font-size: 0.85rem; color: #1a73e8; font-weight: 500; cursor: pointer;
       font-family: inherit; transition: background 0.2s;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .filters__btn:hover { background: #f1f3f4; }
+    
+    .filters__icon-btn {
+      width: 36px; display: flex; align-items: center; justify-content: center;
+      background: #fff; border: 1px solid #dadce0; border-radius: 6px;
+      cursor: pointer; font-size: 0.9rem; transition: background 0.2s;
+    }
+    .filters__icon-btn:hover { background: #f1f3f4; }
+    .filters__icon-btn--delete:hover { background: #fce8e6; color: #c5221f; border-color: #f5c2c7; }
+
+    .filters__add-btn {
+      width: 100%; margin-top: 1rem; padding: 0.6rem;
+      background: #fff; border: 1px dashed #dadce0; border-radius: 6px;
+      color: #5f6368; font-size: 0.85rem; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all 0.2s;
+    }
+    .filters__add-btn:hover { background: #f8f9fa; border-color: #1a73e8; color: #1a73e8; }
+
+    .filters__form {
+      margin-top: 1rem; padding: 1rem; background: #f8f9fa; border: 1px solid #dadce0; border-radius: 8px;
+      display: flex; flex-direction: column; gap: 0.8rem;
+    }
+    .filters__form-title { margin: 0; font-size: 0.9rem; font-weight: 600; color: #202124; }
+    .filters__form-field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .filters__form-label { font-size: 0.75rem; font-weight: 600; color: #5f6368; }
+    .filters__form-input {
+      padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px;
+      font-size: 0.85rem; font-family: inherit;
+    }
+    .filters__form-input:focus { outline: none; border-color: #1a73e8; }
+    .filters__form-actions { display: flex; gap: 0.5rem; margin-top: 0.2rem; }
+    .filters__form-btn {
+      flex: 1; padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit;
+    }
+    .filters__form-btn--save { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+    .filters__form-btn--save:hover { background: #1557b0; }
+    .filters__form-btn--cancel { background: #fff; color: #5f6368; }
+    .filters__form-btn--cancel:hover { background: #f1f3f4; }
 
     /* Challenge Mode */
     .challenge { padding: 2rem 1.2rem; display: flex; justify-content: center; }
@@ -628,6 +702,12 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.oldestEmails().length > 0 ? this.oldestEmails()[0] : null
   );
 
+  protected readonly customFilters = signal<QuickFilter[]>([]);
+  protected readonly isAddingFilter = signal(false);
+  protected readonly editingFilter = signal<QuickFilter | null>(null);
+  protected readonly formLabel = signal('');
+  protected readonly formQuery = signal('');
+
   // true when data came from cache (not a live fetch just performed)
   protected readonly isFromCache = computed(() => {
     const ts = this.activeCachedAt();
@@ -657,6 +737,19 @@ export class StatsComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    chrome.storage.local.get('custom_filters', (data) => {
+      const stored = data['custom_filters'];
+      if (stored && Array.isArray(stored)) {
+        this.customFilters.set(stored);
+      } else {
+        // Default filters
+        this.customFilters.set([
+          { id: '1', label: 'Newsletters', query: 'newsletter' },
+          { id: '2', label: 'Unsubscribe links', query: 'unsubscribe OR "se désinscrire" OR "se désabonner"' }
+        ]);
+        this.saveFiltersToStorage();
+      }
+    });
     this.load();
   }
 
@@ -683,6 +776,69 @@ export class StatsComponent implements OnInit, OnDestroy {
 
   protected searchFilter(query: string): void {
     this.gmailSearch.search(query);
+  }
+
+  protected startAddFilter(): void {
+    this.isAddingFilter.set(true);
+    this.editingFilter.set(null);
+    this.formLabel.set('');
+    this.formQuery.set('');
+  }
+
+  protected startEditFilter(filter: QuickFilter): void {
+    this.editingFilter.set(filter);
+    this.isAddingFilter.set(false);
+    this.formLabel.set(filter.label);
+    this.formQuery.set(filter.query);
+  }
+
+  protected cancelFilterForm(): void {
+    this.isAddingFilter.set(false);
+    this.editingFilter.set(null);
+  }
+
+  protected saveFilterForm(): void {
+    const label = this.formLabel().trim();
+    const query = this.formQuery().trim();
+    if (!label || !query) return;
+
+    const current = this.customFilters();
+    const edit = this.editingFilter();
+
+    if (edit) {
+      this.customFilters.set(
+        current.map(f => f.id === edit.id ? { ...f, label, query } : f)
+      );
+    } else {
+      const newFilter: QuickFilter = {
+        id: Math.random().toString(36).slice(2, 9),
+        label,
+        query
+      };
+      this.customFilters.set([...current, newFilter]);
+    }
+
+    this.saveFiltersToStorage();
+    this.cancelFilterForm();
+  }
+
+  protected deleteFilter(id: string): void {
+    if (confirm('Delete this filter?')) {
+      this.customFilters.update(filters => filters.filter(f => f.id !== id));
+      this.saveFiltersToStorage();
+    }
+  }
+
+  protected setFormLabel(val: string): void {
+    this.formLabel.set(val);
+  }
+
+  protected setFormQuery(val: string): void {
+    this.formQuery.set(val);
+  }
+
+  private saveFiltersToStorage(): void {
+    chrome.storage.local.set({ 'custom_filters': this.customFilters() });
   }
 
   protected unsubscribe(item: SenderStat): void {
