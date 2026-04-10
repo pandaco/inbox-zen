@@ -167,7 +167,6 @@ async function fetchAllMetadata(
       } catch (err: any) {
         retries++;
         if (retries < MAX_RETRIES) {
-          // Exponential backoff: 1s, 2s, 4s, 8s...
           const waitTime = Math.pow(2, retries) * 1000 + (Math.random() * 500);
           console.warn(`[Gmail API] Rate limited or error. Retrying in ${Math.round(waitTime)}ms...`, err);
           await sleep(waitTime);
@@ -178,9 +177,16 @@ async function fetchAllMetadata(
       }
     }
 
-    // Send partial results every 5 seconds or on last chunk
+    // Send partial results:
+    // 1. On the very first batch (immediate feedback)
+    // 2. Every 3 seconds
+    // 3. Every 5 batches (approx 200 emails)
+    // 4. On the last batch
+    const batchCount = Math.floor(i / BATCH_SIZE) + 1;
+    const isFirst = batchCount === 1;
     const isLast = i + BATCH_SIZE >= ids.length;
-    const shouldSendPartial = (Date.now() - lastPartialSentAt > 5000) || isLast;
+    const elapsed = Date.now() - lastPartialSentAt;
+    const shouldSendPartial = isFirst || isLast || (elapsed > 3000) || (batchCount % 5 === 0);
     
     if (onProgress) {
       onProgress(messages.length, ids.length, shouldSendPartial ? (true as any) : undefined, messages, errorCount);
