@@ -135,7 +135,13 @@ async function fetchMetadataBatch(
   return parseBatchResponse(text, contentType);
 }
 
-export type ProgressCallback = (fetched: number, total: number, partialData?: GlobalStats) => void;
+export type ProgressCallback = (
+  fetched: number,
+  total: number,
+  partialData?: GlobalStats,
+  currentMessages?: MessageMetadata[],
+  currentErrors?: number
+) => void;
 
 async function fetchAllMetadata(
   token: string,
@@ -177,7 +183,7 @@ async function fetchAllMetadata(
     const shouldSendPartial = (Date.now() - lastPartialSentAt > 5000) || isLast;
     
     if (onProgress) {
-      onProgress(messages.length, ids.length, shouldSendPartial ? (true as any) : undefined);
+      onProgress(messages.length, ids.length, shouldSendPartial ? (true as any) : undefined, messages, errorCount);
       if (shouldSendPartial) lastPartialSentAt = Date.now();
     }
 
@@ -228,9 +234,9 @@ export async function getGlobalStats(
     token, 
     allIds, 
     ['From', 'Subject', 'Date', 'List-Unsubscribe'], 
-    (fetched, total, shouldCompute) => {
+    (fetched, total, shouldCompute, currentMsgs, currentErrors) => {
       if (onProgress) {
-        const partial = shouldCompute ? calculateStats(messages, fetched, errorCount) : undefined;
+        const partial = (shouldCompute && currentMsgs) ? calculateStats(currentMsgs, fetched, currentErrors || 0) : undefined;
         onProgress(fetched, total, partial);
       }
     }
