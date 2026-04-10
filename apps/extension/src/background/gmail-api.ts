@@ -261,8 +261,13 @@ export async function getGlobalStats(
 
     if (otpRegex.test(subject) && (now - date) > 86400000) expiredOTPs.push({ subject, count: 1 });
     if (parcelRegex.test(subject)) {
-      // Generalize subject by replacing numbers to group similar formats together
-      const generalizedSubject = subject.replace(/[0-9]+/g, '#');
+      // Generalize subject by replacing any blob of characters containing a digit with #
+      // This groups tracking IDs (6Z123...), order numbers, and dates together.
+      const generalizedSubject = subject
+        .replace(/\S*\d\S*/g, '#')
+        .replace(/#+/g, '#') // Collapse multiple adjacent #
+        .replace(/\s+/g, ' ') // Clean up multiple spaces
+        .trim();
       parcelCounts.set(generalizedSubject, (parcelCounts.get(generalizedSubject) || 0) + 1);
     }
     if (inviteRegex.test(subject) && (now - date) > 604800000) pastInvites.push({ subject, count: 1 });
