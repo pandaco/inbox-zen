@@ -1,7 +1,8 @@
 const BUTTON_ID = 'inbox-zen-btn';
 const PANEL_ID = 'inbox-zen-panel';
-const PANEL_WIDTH = '420px';
-const PANEL_HEIGHT = '580px';
+const STORAGE_KEY = 'inbox-zen-dimensions';
+const DEFAULT_WIDTH = 420;
+const DEFAULT_HEIGHT = 580;
 
 function createButton(): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -61,12 +62,17 @@ function createPanel(): HTMLDivElement {
   const wrapper = document.createElement('div');
   wrapper.id = PANEL_ID;
 
+  // Initial styling (hidden by default)
   Object.assign(wrapper.style, {
     position: 'fixed',
     bottom: '84px',
     right: '24px',
-    width: PANEL_WIDTH,
-    height: PANEL_HEIGHT,
+    width: DEFAULT_WIDTH + 'px',
+    height: DEFAULT_HEIGHT + 'px',
+    minWidth: '300px',
+    minHeight: '400px',
+    maxWidth: '90vw',
+    maxHeight: '80vh',
     borderRadius: '12px',
     boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
     zIndex: '99999',
@@ -75,6 +81,88 @@ function createPanel(): HTMLDivElement {
     border: '1px solid #e0e0e0',
     background: '#fff',
   });
+
+  // Load and apply stored dimensions
+  chrome.storage.local.get(STORAGE_KEY, (data) => {
+    const dims = data[STORAGE_KEY] as { width: number; height: number } | undefined;
+    if (dims) {
+      wrapper.style.width = dims.width + 'px';
+      wrapper.style.height = dims.height + 'px';
+    }
+  });
+
+  // Add resize handle (top-left) - since anchored at bottom-right
+  const handle = document.createElement('div');
+  handle.title = 'Resize';
+  Object.assign(handle.style, {
+    position: 'absolute',
+    top: '0',
+    left: '0',
+    width: '24px',
+    height: '24px',
+    cursor: 'nwse-resize',
+    zIndex: '100000',
+    background: 'linear-gradient(135deg, #1a73e8 35%, transparent 35%)',
+    borderRadius: '12px 0 0 0',
+    opacity: '0.4',
+    transition: 'opacity 0.2s',
+  });
+
+  handle.addEventListener('mouseenter', () => handle.style.opacity = '0.8');
+  handle.addEventListener('mouseleave', () => handle.style.opacity = '0.4');
+
+  let isResizing = false;
+  handle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startWidth = parseInt(window.getComputedStyle(wrapper).width);
+    const startHeight = parseInt(window.getComputedStyle(wrapper).height);
+
+    // Cover the iframe with a transparent overlay to avoid mouse events being lost
+    const overlay = document.createElement('div');
+    Object.assign(overlay.style, {
+      position: 'absolute', top: '0', left: '0', right: '0', bottom: '0', zIndex: '99999'
+    });
+    wrapper.appendChild(overlay);
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizing) return;
+      
+      // Resizing from top-left:
+      // moving mouse left (deltaX negative) -> increases width
+      // moving mouse up (deltaY negative) -> increases height
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      
+      const newWidth = Math.max(300, startWidth - deltaX);
+      const newHeight = Math.max(400, startHeight - deltaY);
+      
+      wrapper.style.width = newWidth + 'px';
+      wrapper.style.height = newHeight + 'px';
+    };
+
+    const onMouseUp = () => {
+      isResizing = false;
+      wrapper.removeChild(overlay);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      
+      // Persist dimensions
+      chrome.storage.local.set({
+        [STORAGE_KEY]: {
+          width: parseInt(wrapper.style.width),
+          height: parseInt(wrapper.style.height)
+        }
+      });
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    e.preventDefault();
+  });
+
+  wrapper.appendChild(handle);
 
   const iframe = document.createElement('iframe');
   iframe.src = chrome.runtime.getURL('index.html');
