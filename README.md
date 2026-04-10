@@ -1,64 +1,65 @@
-# 🧘 Inbox Zen: Retrouvez la sérénité dans votre boîte Gmail
+# 🧘 Inbox Zen: Regain Serenity in Your Gmail Inbox
 
-**Inbox Zen** est une extension de navigateur intelligente conçue pour transformer votre gestion d'emails. Ne vous laissez plus submerger par le bruit : identifiez, triez et nettoyez votre boîte de réception en quelques clics.
-
----
-
-## 🚀 Pourquoi Inbox Zen ?
-
-Gmail est un outil formidable, mais il accumule vite des milliers de messages inutiles qui polluent votre espace mental et numérique. Inbox Zen analyse intelligemment votre boîte de réception (Inbox) pour mettre en lumière ce qui mérite d'être supprimé ou archivé.
-
-### ✨ Fonctionnalités Clés
-
-#### 📧 Analyse Intelligente des Expéditeurs
-- **Score de Bruit (Noise Score)** : Identifiez immédiatement les expéditeurs les plus "bruyants" basés sur la fréquence et la récence de leurs envois.
-- **Désinscription en 1 Clic** : Détection automatique des liens `List-Unsubscribe` pour vous désabonner sans même ouvrir l'email.
-
-#### 🧹 Nettoyage des Emails Éphémères
-- **Raccourcis OTP** : Identifiez les codes de vérification et mots de passe temporaires déjà expirés (> 24h).
-- **Suivi de Colis** : Regroupez toutes vos notifications de livraison. L'extension est assez maligne pour grouper les messages similaires même si les numéros de suivi diffèrent.
-- **Invitations Passées** : Retrouvez les anciennes invitations calendrier (`.ics`) qui n'ont plus aucune utilité.
-
-#### 🕰 Filtres de Péremption
-- **Vieux Messages** : Ciblez les emails de plus d'un an qui dorment dans votre boîte de réception sans aucun libellé.
-- **Fils Redondants** : Détectez les conversations interminables qui encombrent votre vue.
-
-#### ⚡ Mode "Challenge 0-Inbox"
-Un mode de tri rapide et ludique ! Traitez vos messages les plus anciens un par un avec une interface de décision instantanée : **Garder** ou **Jeter**. C'est la méthode la plus efficace pour vider une boîte saturée.
-
-#### 🔍 Filtres Rapides & Personnalisables
-Accès direct à des recherches puissantes : "Newsletters", "Liens de désinscription", et bien d'autres pour un nettoyage chirurgical.
+**Inbox Zen** is an intelligent browser extension designed to transform your email management. Stop being overwhelmed by the noise: identify, sort, and clean up your inbox in just a few clicks.
 
 ---
 
-## 🛠 Performance & Confidentialité
+## 🚀 Why Inbox Zen?
 
-- **Optimisation Massive** : Grâce à notre technologie de "Crawl Unique", l'extension récupère toutes les données en un seul passage, préservant ainsi votre batterie et votre quota Google API.
-- **Vue Confort** : Un bouton dédié vous permet de passer du mode "Pop-in" (dans Gmail) à un onglet plein écran pour un tri plus spacieux.
-- **Sécurité First** : Vos données restent chez vous. L'extension communique directement avec l'API Gmail sans serveur intermédiaire.
+Gmail is a great tool, but it quickly accumulates thousands of useless messages that clutter your mental and digital space. Inbox Zen intelligently analyzes your Inbox to highlight what deserves to be deleted or archived.
 
----
+### ✨ Key Features
 
-## 💻 Installation (Développeurs)
+#### 📧 Intelligent Sender Analysis
+- **Noise Score**: Immediately identify the "noisiest" senders based on the frequency and recency of their emails.
+- **1-Click Unsubscribe**: Automatic detection of `List-Unsubscribe` links to unsubscribe without even opening the email.
 
-1. **Cloner le dépôt** : `git clone https://github.com/votre-compte/inbox-zen.git`
-2. **Installer les dépendances** : `npm install`
-3. **Build du projet** : `npm run build`
-4. **Charger dans Chrome** :
-   - Allez sur `chrome://extensions/`
-   - Activez le **Mode développeur**
-   - Cliquez sur **Charger l'extension décompressée**
-   - Sélectionnez le dossier `apps/extension/dist`
+#### 🧹 Cleaning Up Ephemeral Emails
+- **OTP Shortcuts**: Identify verification codes and temporary passwords that have already expired (> 24h).
+- **Parcel Tracking**: Group all your delivery notifications. The extension is smart enough to group similar messages even if tracking numbers differ.
+- **Past Invites**: Find old calendar invitations (`.ics`) that are no longer useful.
 
----
+#### 🕰 Expiration Filters
+- **Old Messages**: Target emails over a year old that are sitting in your inbox without any labels.
+- **Redundant Threads**: Detect long-winded conversations that clutter your view.
 
-## 📜 Commandes Utiles
+#### ⚡ "Inbox Zero Challenge" Mode
+A fast and fun sorting mode! Process your oldest messages one by one with an instant decision interface: **Keep** or **Discard**. This is the most effective method to clear a saturated inbox.
 
-- `npm run start` : Lancer le serveur de développement Angular.
-- `npm run build` : Compiler l'extension complète.
-- `npm run lint` : Vérifier la qualité du code.
-- `npm run test` : Lancer les tests unitaires.
+#### 🔍 Quick & Customizable Filters
+Direct access to powerful searches: "Newsletters", "Unsubscribe links", and many others for surgical cleaning.
 
 ---
 
-*Transformez votre chaos numérique en un havre de paix avec Inbox Zen.* 🕊️
+## 🛠 Performance & Privacy
+
+- **Performance**: Single Inbox crawl to save Gmail API quota.
+- **Customizable Interface**: Resize the pop-in according to your needs (width and height). Your preferences are automatically remembered.
+- **Comfort View**: A dedicated button allows you to switch from "Pop-in" mode (within Gmail) to a full-screen tab for more spacious sorting.
+- **Privacy First**: Your data stays with you. The extension communicates directly with the Gmail API without an intermediary server.
+
+---
+
+## 💻 Installation (Developers)
+
+1. **Clone the repository**: `git clone https://github.com/your-account/inbox-zen.git`
+2. **Install dependencies**: `npm install`
+3. **Build the project**: `npm run build`
+4. **Load in Chrome**:
+   - Go to `chrome://extensions/`
+   - Enable **Developer Mode**
+   - Click on **Load unpacked**
+   - Select the `apps/extension/dist` folder
+
+---
+
+## 📜 Useful Commands
+
+- `npm run start`: Launch the Angular development server.
+- `npm run build`: Compile the full extension.
+- `npm run lint`: Check code quality.
+- `npm run test`: Run unit tests.
+
+---
+
+*Transform your digital chaos into a haven of peace with Inbox Zen.* 🕊️
