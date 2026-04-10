@@ -83,13 +83,13 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
             [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Redundant message threads">
             Redundant
           </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
-            [class.active]="activeTab() === 'challenge'" (click)="setTab('challenge')" title="Zero-Inbox Challenge">
-            Challenge ⚡
-          </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
             [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
             Filters
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
+            [class.active]="activeTab() === 'challenge'" (click)="setTab('challenge')" title="Zero-Inbox Challenge">
+            Challenge ⚡
           </button>
         </nav>
       }
@@ -233,6 +233,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                 <div class="challenge__meta">Oldest Email ({{ oldestEmails().length }} left)</div>
                 <h2 class="challenge__subject">{{ challengeCurrent()?.subject }}</h2>
                 <div class="challenge__from">{{ challengeCurrent()?.from }}</div>
+                @if (challengeCurrent()?.snippet) {
+                  <div class="challenge__snippet">{{ challengeCurrent()?.snippet }}</div>
+                }
                 <div class="challenge__actions">
                   <button class="challenge__btn challenge__btn--keep" (click)="skipChallenge(challengeCurrent()!)">Keep</button>
                   <button class="challenge__btn challenge__btn--trash" (click)="trashChallenge(challengeCurrent()!)">Trash</button>
@@ -580,7 +583,13 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
     }
     .challenge__meta { font-size: 0.7rem; font-weight: 600; color: #1a73e8; text-transform: uppercase; letter-spacing: 0.5px; }
     .challenge__subject { margin: 0; font-size: 1rem; font-weight: 600; color: #202124; line-height: 1.4; }
-    .challenge__from { font-size: 0.82rem; color: #5f6368; word-break: break-all; }
+    .challenge__from { font-size: 0.82rem; color: #5f6368; word-break: break-all; margin-bottom: 0.4rem; }
+    .challenge__snippet { 
+      font-size: 0.85rem; color: #5f6368; line-height: 1.5;
+      background: #f8f9fa; padding: 0.8rem; border-radius: 8px;
+      max-height: 120px; overflow-y: auto; font-style: italic;
+      border-left: 3px solid #1a73e8;
+    }
     .challenge__actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
     .challenge__btn {
       flex: 1; padding: 0.7rem; border: 1px solid #dadce0; border-radius: 8px;

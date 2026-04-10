@@ -61,6 +61,7 @@ export interface SizeStat {
   from: string;
   sizeEstimate: number;
   id?: string;
+  snippet?: string;
 }
 
 export interface StatsResult<T> {

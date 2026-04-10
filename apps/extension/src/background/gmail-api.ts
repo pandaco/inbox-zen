@@ -23,6 +23,7 @@ interface MessageMetadata {
   id: string;
   threadId?: string;
   sizeEstimate: number;
+  snippet?: string;
   payload?: { headers?: { name: string; value: string }[] };
 }
 
@@ -96,7 +97,7 @@ async function fetchMetadataBatch(
   const boundary = `batch_${Math.random().toString(36).slice(2)}`;
   
   // Strict fields selection to reduce response size and latency
-  const fields = 'id,threadId,sizeEstimate,payload(headers)';
+  const fields = 'id,threadId,sizeEstimate,snippet,payload(headers)';
 
   const body = ids
     .map(id => {
@@ -193,16 +194,18 @@ export async function getGlobalStats(
   const now = Date.now();
   
   // 1. Surgical parallel ID fetching, strictly restricted to INBOX
-  const [unreadIds, heavyIds, oldIds] = await Promise.all([
+  const [unreadIds, heavyIds, oldIds, inviteIds] = await Promise.all([
     listAllMessageIds(token, 'in:inbox is:unread'),
     listAllMessageIds(token, 'in:inbox (has:attachment OR larger:100kb)'),
-    listAllMessageIds(token, 'in:inbox older_than:1y')
+    listAllMessageIds(token, 'in:inbox older_than:1y'),
+    listAllMessageIds(token, 'in:inbox (filename:invite.ics OR "google calendar")')
   ]);
 
   const unreadSet = new Set(unreadIds);
   const heavySet = new Set(heavyIds);
   const oldSet = new Set(oldIds);
-  const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds]));
+  const inviteSet = new Set(inviteIds);
+  const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds, ...inviteIds]));
 
   // Reusable calculation logic for partial and final results
   const calculateStats = (msgs: MessageMetadata[], fetchedCount: number, currentErrors: number): GlobalStats => {
@@ -214,7 +217,7 @@ export async function getGlobalStats(
       expiredOTPs: processOTPs(msgs, fetchedCount, currentErrors),
       parcelNotifications: processParcels(msgs, fetchedCount, currentErrors),
       oldEmails: processOld(filter(oldSet), fetchedCount, currentErrors),
-      pastInvites: processInvites(msgs, fetchedCount, currentErrors),
+      pastInvites: processInvites(filter(inviteSet), msgs, fetchedCount, currentErrors),
       redundantThreads: processRedundant(msgs, fetchedCount, currentErrors),
       oldestEmails: processOldest(msgs, fetchedCount, currentErrors),
     };
@@ -326,12 +329,13 @@ function processOld(messages: MessageMetadata[], totalFetched: number, errorCoun
   return { items, totalFetched, errorCount };
 }
 
-function processInvites(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const items = messages
+function processInvites(inviteMsgs: MessageMetadata[], allMessages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const inviteRegex = /invite\.ics|google calendar/i;
+  const items = allMessages
     .filter(m => {
       const s = getHeader(m, 'Subject') || '';
       const date = new Date(getHeader(m, 'Date')).getTime();
-      return (s.includes('Invitation') || s.includes('Accepted') || s.includes('Event')) && (Date.now() - date > 86400000 * 7);
+      return (inviteRegex.test(s) || (inviteMsgs.some(im => im.id === m.id))) && (Date.now() - date > 86400000 * 7);
     })
     .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
   return { items, totalFetched, errorCount };
@@ -360,7 +364,8 @@ function processOldest(messages: MessageMetadata[], totalFetched: number, errorC
       id: m.id, 
       subject: getHeader(m, 'Subject') || '(no subject)', 
       from: getHeader(m, 'From'), 
-      sizeEstimate: new Date(getHeader(m, 'Date')).getTime() 
+      sizeEstimate: new Date(getHeader(m, 'Date')).getTime(),
+      snippet: m.snippet // Added snippet here
     }))
     .sort((a, b) => a.sizeEstimate - b.sizeEstimate);
   return { items, totalFetched, errorCount };
