@@ -96,12 +96,25 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
         </nav>
       }
 
-      @if (totalFetched() > 0) {
+      @if (totalFetched() > 0 || isLoading()) {
         <div class="stats__meta" [class.stats__meta--error]="errorCount() > 0">
-          {{ totalFetched() }} emails analysed
-          @if (errorCount() > 0) {
-            · <strong>{{ errorCount() }} errors</strong> (partial data)
-          }
+          <div class="stats__meta-row">
+            <span class="stats__meta-text">
+              @if (isLoading()) {
+                Analyzing... {{ loadFetched() }} / {{ loadTotal() }}
+              } @else {
+                {{ totalFetched() }} emails analysed
+                @if (errorCount() > 0) {
+                  · <strong>{{ errorCount() }} errors</strong>
+                }
+              }
+            </span>
+            @if (isLoading() && loadTotal() > 0) {
+              <div class="stats__load-bar-bg stats__load-bar-bg--mini">
+                <div class="stats__load-bar" [style.width.%]="(loadFetched() / loadTotal()) * 100"></div>
+              </div>
+            }
+          </div>
         </div>
       }
 
@@ -109,33 +122,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
         @if (isLoading() && totalFetched() === 0) {
           <div class="stats__loading" role="status" aria-label="Loading">
             <span class="stats__spinner"></span>
-            @if (loadTotal() > 0) {
-              <p class="stats__loading-text">
-                Analyzing {{ loadTotal() }} emails in your Inbox…
-              </p>
-              <div class="stats__load-bar-bg">
-                <div class="stats__load-bar"
-                  [style.width.%]="(loadFetched() / loadTotal()) * 100">
-                </div>
-              </div>
-            } @else {
-              <p class="stats__loading-text">Scanning Inbox (read & unread)…</p>
-            }
+            <p class="stats__loading-text">Scanning Inbox (read & unread)…</p>
           </div>
         } @else {
-          @if (isLoading()) {
-            <div class="stats__progress-overlay">
-              <div class="stats__load-bar-bg stats__load-bar-bg--mini">
-                <div class="stats__load-bar"
-                  [style.width.%]="(loadFetched() / loadTotal()) * 100">
-                </div>
-              </div>
-              <p class="stats__loading-text stats__loading-text--mini">
-                Updating results... {{ loadFetched() }} / {{ loadTotal() }}
-              </p>
-            </div>
-          }
-
           @if (error()) {
             <div class="stats__error" role="alert">
               <p>{{ error() }}</p>
@@ -437,37 +426,30 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
     .stats__tabs button.active { color: #1a73e8; border-bottom-color: #1a73e8; }
 
     .stats__meta {
-      padding: 0.4rem 1.2rem;
+      padding: 0.6rem 1.2rem;
       font-size: 0.75rem;
       color: #5f6368;
       background: #f8f9fa;
       border-bottom: 1px solid #e0e0e0;
     }
     .stats__meta--error { color: #b06000; background: #fef7e0; }
+    .stats__meta-row { display: flex; align-items: center; gap: 1rem; }
+    .stats__meta-text { flex: 1; font-weight: 500; }
 
-    .stats__body { flex: 1; overflow-y: auto; padding: 0.75rem 0; }
+    .stats__body { flex: 1; overflow-y: auto; padding: 0.75rem 0; position: relative; }
 
     .stats__loading {
       display: flex; flex-direction: column;
       align-items: center; gap: 0.75rem; padding: 3rem 1.5rem 2rem;
     }
     .stats__loading-text { margin: 0; font-size: 0.82rem; color: #5f6368; }
-    .stats__loading-text--mini { font-size: 0.75rem; font-weight: 600; text-align: center; margin-top: 0.3rem; }
     .stats__load-bar-bg {
-      width: 100%; height: 4px;
+      width: 100px; height: 4px;
       background: #e0e0e0; border-radius: 2px; overflow: hidden;
     }
-    .stats__load-bar-bg--mini { height: 3px; border-radius: 0; }
     .stats__load-bar {
       height: 100%; background: #1a73e8; border-radius: 2px;
       transition: width 0.3s ease;
-    }
-    .stats__progress-overlay {
-      position: sticky; top: 0; z-index: 10;
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(4px);
-      padding: 0.6rem 1.2rem;
-      border-bottom: 1px solid #e0e0e0;
     }
     .stats__spinner {
       width: 28px; height: 28px;
