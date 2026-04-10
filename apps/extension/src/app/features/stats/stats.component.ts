@@ -140,7 +140,12 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                   <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
-                      <span class="chart__name">{{ item.sender }}</span>
+                      <span class="chart__name">
+                        {{ item.sender }}
+                        @if (item.email && item.email !== item.sender) {
+                          <span class="chart__email">&lt;{{ item.email }}&gt;</span>
+                        }
+                      </span>
                       @if (item.unsubscribeUrl) {
                         <button class="chart__unsub" (click)="$event.stopPropagation(); unsubscribe(item)"
                                 title="Unsubscribe from this list">
@@ -434,6 +439,13 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
       overflow: hidden;
       text-overflow: ellipsis;
       flex: 1;
+    }
+
+    .chart__email {
+      font-size: 0.75rem;
+      font-weight: 400;
+      color: #5f6368;
+      margin-left: 0.3rem;
     }
 
     .chart__value {
