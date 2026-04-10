@@ -49,48 +49,50 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
         </div>
       </header>
 
-      <nav class="stats__tabs" role="tablist">
-        <button role="tab" [attr.aria-selected]="activeTab() === 'unread'"
-          [class.active]="activeTab() === 'unread'" (click)="setTab('unread')">
-          Unread
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'repeated'"
-          [class.active]="activeTab() === 'repeated'" (click)="setTab('repeated')">
-          Repeated
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'heaviest'"
-          [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
-          Heaviest
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'otp'"
-          [class.active]="activeTab() === 'otp'" (click)="setTab('otp')" title="Expired verification codes">
-          OTP
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
-          [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Parcel tracking">
-          Parcels
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'old'"
-          [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 2 years without label">
-          Old
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
-          [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites">
-          Invites
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'redundant'"
-          [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Redundant message threads">
-          Redundant
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
-          [class.active]="activeTab() === 'challenge'" (click)="setTab('challenge')" title="Zero-Inbox Challenge">
-          Challenge ⚡
-        </button>
-        <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
-          [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
-          Filters
-        </button>
-      </nav>
+      @if (!isLoading()) {
+        <nav class="stats__tabs" role="tablist">
+          <button role="tab" [attr.aria-selected]="activeTab() === 'unread'"
+            [class.active]="activeTab() === 'unread'" (click)="setTab('unread')">
+            Unread
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'repeated'"
+            [class.active]="activeTab() === 'repeated'" (click)="setTab('repeated')">
+            Repeated
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'heaviest'"
+            [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
+            Heaviest
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'otp'"
+            [class.active]="activeTab() === 'otp'" (click)="setTab('otp')" title="Expired verification codes">
+            OTP
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
+            [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Parcel tracking">
+            Parcels
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'old'"
+            [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 2 years without label">
+            Old
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
+            [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites">
+            Invites
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'redundant'"
+            [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Redundant message threads">
+            Redundant
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
+            [class.active]="activeTab() === 'challenge'" (click)="setTab('challenge')" title="Zero-Inbox Challenge">
+            Challenge ⚡
+          </button>
+          <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
+            [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
+            Filters
+          </button>
+        </nav>
+      }
 
       @if (!isLoading() && totalFetched() > 0) {
         <div class="stats__meta" [class.stats__meta--error]="errorCount() > 0">
@@ -145,10 +147,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                           Unsubscribe
                         </button>
                       }
-                      <button class="chart__clear" (click)="$event.stopPropagation(); clearSender(item)"
-                              title="Clear all unread emails from this sender">
-                        Clear All
-                      </button>
                       <span class="chart__value">{{ item.count }}</span>
                     </div>
                     <div class="chart__bar-bg" role="presentation">
@@ -530,7 +528,10 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly globalCachedAt = signal<number | null>(null);
   protected readonly stats = signal<GlobalStats | null>(null);
 
-  protected readonly senders = computed(() => this.stats()?.unreadSenders.items ?? []);
+  protected readonly senders = computed(() => {
+    const items = this.stats()?.unreadSenders.items ?? [];
+    return [...items].sort((a, b) => b.count - a.count);
+  });
   protected readonly heaviest = computed(() => this.stats()?.heaviestEmails.items ?? []);
   protected readonly repeated = computed(() => this.stats()?.repeatedSubjects.items ?? []);
   protected readonly otps = computed(() => this.stats()?.expiredOTPs.items ?? []);
@@ -766,6 +767,8 @@ export class StatsComponent implements OnInit, OnDestroy {
   openInNewTab() {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
       chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+      // Notify content script to close the side panel
+      window.parent.postMessage({ type: 'CLOSE_PANEL' }, '*');
     }
   }
 }

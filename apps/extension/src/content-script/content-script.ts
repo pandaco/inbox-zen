@@ -102,11 +102,18 @@ function inject(): void {
   document.body.appendChild(createPanel());
 }
 
-// Listen for search requests from the iframe
+// Listen for search or UI requests from the iframe
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.data?.type === 'GMAIL_SEARCH' && typeof event.data.query === 'string') {
     const encoded = encodeURIComponent(event.data.query as string).replace(/%20/g, '+');
     window.location.hash = `#search/${encoded}`;
+  }
+
+  if (event.data?.type === 'CLOSE_PANEL') {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) {
+      panel.style.display = 'none';
+    }
   }
 });
 
