@@ -223,7 +223,7 @@ export async function getGlobalStats(
       const score = (s.count / days) * ( (now - s.lastDate) < 604800000 ? 2 : 1) * Math.log10(s.count + 1);
       return { sender: s.name || email, email, count: s.count, unsubscribeUrl: s.unsubscribeUrl, score };
     })
-    .sort((a, b) => (b.score || 0) - (a.score || 0));
+    .sort((a, b) => b.count - a.count);
 
   // B. Heaviest
   const heaviestEmails = heavyMsgs
@@ -246,7 +246,6 @@ export async function getGlobalStats(
 
   // D. OTP & Parcels & Old & Invites
   const expiredOTPs: SubjectStat[] = [];
-  const parcelNotifications: SubjectStat[] = [];
   const oldEmails: SubjectStat[] = [];
   const pastInvites: SubjectStat[] = [];
 
@@ -254,16 +253,26 @@ export async function getGlobalStats(
   const parcelRegex = /shipping|delivery|colis|livraison|expédition/i;
   const inviteRegex = /invite\.ics/i;
 
+  const parcelCounts = new Map<string, number>();
+
   for (const m of messages) {
     const subject = getHeader(m, 'Subject') || '';
     const date = new Date(getHeader(m, 'Date') || now).getTime();
 
     if (otpRegex.test(subject) && (now - date) > 86400000) expiredOTPs.push({ subject, count: 1 });
-    if (parcelRegex.test(subject)) parcelNotifications.push({ subject, count: 1 });
+    if (parcelRegex.test(subject)) {
+      // Generalize subject by replacing numbers to group similar formats together
+      const generalizedSubject = subject.replace(/[0-9]+/g, '#');
+      parcelCounts.set(generalizedSubject, (parcelCounts.get(generalizedSubject) || 0) + 1);
+    }
     if (inviteRegex.test(subject) && (now - date) > 604800000) pastInvites.push({ subject, count: 1 });
     // Old: older than 1 year (matching our query)
     if ((now - date) > (365 * 86400000)) oldEmails.push({ subject, count: 1 });
   }
+
+  const parcelNotifications = [...parcelCounts.entries()]
+    .map(([subject, count]) => ({ subject, count }))
+    .sort((a, b) => b.count - a.count);
 
   // E. Oldest for Challenge (take the last 50 from our 'old' subset)
   const oldestEmailsResult = oldMsgs.reverse().slice(0, 50).map(m => ({
