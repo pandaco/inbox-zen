@@ -4,8 +4,13 @@ import type { BgMessage, BgResponse, PortMessage, GlobalStats } from '../shared/
 export type { BgMessage, BgResponse };
 export type { MessageType } from '../shared/types';
 
+const TOKEN_KEY = 'gmail_access_token';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_KEY = 'cache_global_stats';
+
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+].join(' ');
 
 interface CacheEntry {
   result: GlobalStats;
@@ -23,11 +28,36 @@ async function setCached(result: GlobalStats): Promise<void> {
   await chrome.storage.local.set({ [CACHE_KEY]: { result, cachedAt: Date.now() } });
 }
 
+async function getManifestClientId(): Promise<string> {
+  const manifest = chrome.runtime.getManifest() as chrome.runtime.Manifest & {
+    oauth2?: { client_id: string };
+  };
+  return manifest.oauth2?.client_id ?? '';
+}
+
 async function authenticate(interactive = true): Promise<string> {
+  const clientId = await getManifestClientId();
+  const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
+  
+  // We remove 'prompt=consent' to allow silent re-auth if already authorized
+  const authUrl =
+    `https://accounts.google.com/o/oauth2/v2/auth` +
+    `?client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&response_type=token` +
+    `&scope=${encodeURIComponent(SCOPES)}`;
+
   return new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive }, (token) => {
-      if (chrome.runtime.lastError || !token) {
+    chrome.identity.launchWebAuthFlow({ url: authUrl, interactive }, (responseUrl) => {
+      if (chrome.runtime.lastError || !responseUrl) {
         reject(new Error(chrome.runtime.lastError?.message ?? 'Auth failed'));
+        return;
+      }
+      const hash = new URL(responseUrl).hash.slice(1);
+      const params = new URLSearchParams(hash);
+      const token = params.get('access_token');
+      if (!token) {
+        reject(new Error('No access token in response'));
         return;
       }
       resolve(token);
@@ -36,34 +66,37 @@ async function authenticate(interactive = true): Promise<string> {
 }
 
 async function getStoredToken(): Promise<string | null> {
-  try {
-    // Try to get token silently
-    return await authenticate(false);
-  } catch {
-    return null;
+  const result = await chrome.storage.local.get(TOKEN_KEY);
+  let token = (result[TOKEN_KEY] as string | undefined) ?? null;
+  
+  if (!token) {
+    try {
+      // Try silent auth if no token stored
+      token = await authenticate(false);
+      if (token) await storeToken(token);
+    } catch {
+      return null;
+    }
   }
+  return token;
+}
+
+async function storeToken(token: string): Promise<void> {
+  await chrome.storage.local.set({ [TOKEN_KEY]: token });
 }
 
 async function clearToken(): Promise<void> {
   const token = await getStoredToken();
   if (token) {
-    await new Promise<void>((resolve) => {
-      chrome.identity.removeCachedAuthToken({ token }, () => {
-        // Also revoke on Google side
-        fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`).finally(() => resolve());
-      });
+    await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`).catch(() => {
+      /* ignore revoke errors */
     });
   }
+  await chrome.storage.local.remove(TOKEN_KEY);
 }
 
 function isAuthError(err: unknown): boolean {
   return (err as any)?.status === 401 || (err instanceof Error && err.message.includes('401'));
-}
-
-async function invalidateToken(token: string): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.identity.removeCachedAuthToken({ token }, resolve);
-  });
 }
 
 async function handle(message: BgMessage): Promise<BgResponse> {
@@ -76,6 +109,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
     case 'AUTHENTICATE': {
       try {
         const token = await authenticate(true);
+        await storeToken(token);
         return { success: true, data: { authenticated: !!token } };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : 'Auth failed' };
@@ -97,7 +131,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
         return { success: true, data };
       } catch (err) {
         if (isAuthError(err)) {
-          await invalidateToken(token);
+          await chrome.storage.local.remove(TOKEN_KEY);
           return { success: false, error: 'SESSION_EXPIRED' };
         }
         throw err;
@@ -114,7 +148,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
         return { success: data };
       } catch (err) {
         if (isAuthError(err)) {
-          await invalidateToken(token);
+          await chrome.storage.local.remove(TOKEN_KEY);
           return { success: false, error: 'SESSION_EXPIRED' };
         }
         throw err;
@@ -168,7 +202,7 @@ chrome.runtime.onConnect.addListener((port) => {
       })
       .catch(async (err: unknown) => {
         if (isAuthError(err)) {
-          await invalidateToken(token);
+          await chrome.storage.local.remove(TOKEN_KEY);
           send({ type: 'RESULT', success: false, error: 'SESSION_EXPIRED' });
         } else {
           const msg = err instanceof Error ? err.message : 'Unknown error';
