@@ -4,8 +4,8 @@ export type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats };
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const BATCH_API = 'https://www.googleapis.com/batch/gmail/v1';
-const BATCH_SIZE = 40;       // Safer batch size for Gmail rate limits
-const BATCH_DELAY_MS = 1200; // Increased delay to stay under quota
+const BATCH_SIZE = 50;       // Max recommended batch size
+const BATCH_DELAY_MS = 1100; // Optimal delay to stay under 250 units/s (50 * 5 = 250)
 const MAX_RETRIES = 5;
 
 async function fetchJson<T>(url: string, token: string): Promise<T> {
@@ -81,7 +81,7 @@ function parseBatchResponse(text: string, contentType: string): MessageMetadata[
       if (jsonStart === -1 || jsonEnd === -1) return [];
       try {
         const parsed = JSON.parse(part.slice(jsonStart, jsonEnd + 1)) as MessageMetadata;
-        if (!parsed.id) return []; // skip error responses (e.g. 404 per-item failures)
+        if (!parsed.id) return [];
         return [parsed];
       } catch {
         return [];
@@ -95,18 +95,12 @@ async function fetchMetadataBatch(
   metadataHeaders: string[],
 ): Promise<MessageMetadata[]> {
   const boundary = `batch_${Math.random().toString(36).slice(2)}`;
-  
-  // Strict fields selection to reduce response size and latency
   const fields = 'id,threadId,sizeEstimate,snippet,payload(headers)';
 
   const body = ids
     .map(id => {
-      const params = new URLSearchParams({
-        format: 'metadata',
-        fields: fields,
-      });
+      const params = new URLSearchParams({ format: 'metadata', fields });
       metadataHeaders.forEach(h => params.append('metadataHeaders', h));
-
       return (
         `--${boundary}\r\n` +
         `Content-Type: application/http\r\n\r\n` +
@@ -125,14 +119,10 @@ async function fetchMetadataBatch(
   });
 
   if (!res.ok) {
-    if (res.status === 429 || res.status === 503) {
-      throw { status: res.status, message: 'Rate limited' };
-    }
+    if (res.status === 429 || res.status === 503) throw { status: res.status, message: 'Rate limited' };
     throw new Error(`Batch request failed: ${res.status}`);
   }
-  const text = await res.text();
-  const contentType = res.headers.get('Content-Type') || '';
-  return parseBatchResponse(text, contentType);
+  return parseBatchResponse(await res.text(), res.headers.get('Content-Type') || '');
 }
 
 export type ProgressCallback = (
@@ -143,7 +133,11 @@ export type ProgressCallback = (
   currentErrors?: number
 ) => void;
 
-async function fetchAllMetadata(
+/**
+ * Optimized fetcher using two parallel workers to saturate the 250 units/s quota.
+ * For 12,000 emails, this reduces the time to ~4 minutes (theoretical minimum).
+ */
+async function fetchAllMetadataOptimized(
   token: string,
   ids: string[],
   metadataHeaders: string[],
@@ -152,49 +146,65 @@ async function fetchAllMetadata(
   const messages: MessageMetadata[] = [];
   let errorCount = 0;
   let lastPartialSentAt = Date.now();
-
+  
+  // Split IDs into chunks of BATCH_SIZE
+  const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-    const chunk = ids.slice(i, i + BATCH_SIZE);
-    let retries = 0;
-    let success = false;
+    chunks.push(ids.slice(i, i + BATCH_SIZE));
+  }
 
-    while (retries < MAX_RETRIES && !success) {
-      try {
-        const results = await fetchMetadataBatch(token, chunk, metadataHeaders);
-        messages.push(...results);
-        errorCount += chunk.length - results.length;
-        success = true;
-      } catch (err: any) {
-        retries++;
-        if (retries < MAX_RETRIES) {
-          const waitTime = Math.pow(2, retries) * 1000 + (Math.random() * 500);
-          console.warn(`[Gmail API] Rate limited or error. Retrying in ${Math.round(waitTime)}ms...`, err);
-          await sleep(waitTime);
-        } else {
-          console.error(`[Gmail API] Failed chunk after ${MAX_RETRIES} retries.`, err);
-          errorCount += chunk.length;
+  // Worker that processes chunks with a delay to respect quota
+  // We use 2 workers in parallel, each taking 50% of the quota
+  const processWorker = async (workerChunks: string[][], workerDelay: number) => {
+    for (const chunk of workerChunks) {
+      let retries = 0;
+      let success = false;
+
+      while (retries < MAX_RETRIES && !success) {
+        try {
+          const results = await fetchMetadataBatch(token, chunk, metadataHeaders);
+          messages.push(...results);
+          errorCount += chunk.length - results.length;
+          success = true;
+        } catch (err: any) {
+          retries++;
+          if (retries < MAX_RETRIES) {
+            const waitTime = Math.pow(2, retries) * 1000 + (Math.random() * 500);
+            await sleep(waitTime);
+          } else {
+            errorCount += chunk.length;
+          }
         }
       }
-    }
 
-    // Send partial results:
-    // 1. On the very first batch (immediate feedback)
-    // 2. Every 3 seconds
-    // 3. Every 5 batches (approx 200 emails)
-    // 4. On the last batch
-    const batchCount = Math.floor(i / BATCH_SIZE) + 1;
-    const isFirst = batchCount === 1;
-    const isLast = i + BATCH_SIZE >= ids.length;
-    const elapsed = Date.now() - lastPartialSentAt;
-    const shouldSendPartial = isFirst || isLast || (elapsed > 3000) || (batchCount % 5 === 0);
-    
-    if (onProgress) {
-      onProgress(messages.length, ids.length, shouldSendPartial ? (true as any) : undefined, messages, errorCount);
-      if (shouldSendPartial) lastPartialSentAt = Date.now();
-    }
+      // Progress reporting logic (Shared by workers)
+      const batchCount = Math.floor(messages.length / BATCH_SIZE);
+      const isFirst = messages.length <= BATCH_SIZE;
+      const isLast = messages.length + errorCount >= ids.length;
+      const elapsed = Date.now() - lastPartialSentAt;
+      const shouldSendPartial = isFirst || isLast || (elapsed > 3000) || (batchCount % 10 === 0);
+      
+      if (onProgress && shouldSendPartial) {
+        onProgress(messages.length, ids.length, true as any, messages, errorCount);
+        lastPartialSentAt = Date.now();
+      }
 
-    if (i + BATCH_SIZE < ids.length) await sleep(BATCH_DELAY_MS);
-  }
+      await sleep(workerDelay);
+    }
+  };
+
+  // Divide chunks between 2 workers
+  const half = Math.ceil(chunks.length / 2);
+  const worker1Chunks = chunks.slice(0, half);
+  const worker2Chunks = chunks.slice(half);
+
+  // Each worker waits twice the normal delay to keep combined throughput at ~50 emails/s
+  const workerDelay = BATCH_DELAY_MS * 2;
+
+  await Promise.all([
+    processWorker(worker1Chunks, workerDelay),
+    processWorker(worker2Chunks, workerDelay)
+  ]);
 
   return { messages, errorCount };
 }
@@ -203,9 +213,6 @@ export async function getGlobalStats(
   token: string,
   onProgress?: ProgressCallback,
 ): Promise<GlobalStats> {
-  const now = Date.now();
-  
-  // 1. Surgical parallel ID fetching, strictly restricted to INBOX
   const [unreadIds, heavyIds, oldIds, inviteIds] = await Promise.all([
     listAllMessageIds(token, 'in:inbox is:unread'),
     listAllMessageIds(token, 'in:inbox (has:attachment OR larger:100kb)'),
@@ -219,7 +226,6 @@ export async function getGlobalStats(
   const inviteSet = new Set(inviteIds);
   const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds, ...inviteIds]));
 
-  // Reusable calculation logic for partial and final results
   const calculateStats = (msgs: MessageMetadata[], fetchedCount: number, currentErrors: number): GlobalStats => {
     const filter = (idSet: Set<string>): MessageMetadata[] => msgs.filter(m => idSet.has(m.id));
     return {
@@ -235,8 +241,7 @@ export async function getGlobalStats(
     };
   };
 
-  // 3. One single crawl of metadata with partial updates
-  const { messages, errorCount } = await fetchAllMetadata(
+  const { messages, errorCount } = await fetchAllMetadataOptimized(
     token, 
     allIds, 
     ['From', 'Subject', 'Date', 'List-Unsubscribe'], 
@@ -251,12 +256,11 @@ export async function getGlobalStats(
   return calculateStats(messages, allIds.length, errorCount);
 }
 
-// --- Specific Processors ---
+// --- Processors ---
 
 function processUnreadSenders(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SenderStat> {
   const now = Date.now();
   const senderCounts = new Map<string, { name: string; count: number; unsubscribeUrl?: string; firstDate: number; lastDate: number }>();
-  
   for (const m of messages) {
     const from = getHeader(m, 'From');
     if (!from) continue;
@@ -265,7 +269,6 @@ function processUnreadSenders(messages: MessageMetadata[], totalFetched: number,
     const date = new Date(getHeader(m, 'Date') || now).getTime();
     const unsub = getHeader(m, 'List-Unsubscribe');
     const unsubUrl = unsub?.match(/<(https?:\/\/[^>]+)>/)?.[1];
-
     const existing = senderCounts.get(email);
     if (existing) {
       existing.count++;
@@ -276,7 +279,6 @@ function processUnreadSenders(messages: MessageMetadata[], totalFetched: number,
       senderCounts.set(email, { name, count: 1, unsubscribeUrl: unsubUrl, firstDate: date, lastDate: date });
     }
   }
-
   const items = [...senderCounts.entries()]
     .map(([email, s]) => {
       const days = Math.max(1, (s.lastDate - s.firstDate) / 86400000);
@@ -284,7 +286,6 @@ function processUnreadSenders(messages: MessageMetadata[], totalFetched: number,
       return { sender: s.name || email, email, count: s.count, unsubscribeUrl: s.unsubscribeUrl, score };
     })
     .sort((a, b) => b.count - a.count);
-
   return { items, totalFetched, errorCount };
 }
 
@@ -301,10 +302,7 @@ function processRepeatedSubjects(messages: MessageMetadata[], totalFetched: numb
     const s = getHeader(m, 'Subject') || '(no subject)';
     counts.set(s, (counts.get(s) || 0) + 1);
   }
-  const items = [...counts.entries()]
-    .filter(([_, count]) => count > 2)
-    .map(([subject, count]) => ({ subject, count }))
-    .sort((a, b) => b.count - a.count);
+  const items = [...counts.entries()].filter(([_, c]) => c > 2).map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 
@@ -326,13 +324,11 @@ function processParcels(messages: MessageMetadata[], totalFetched: number, error
   for (const m of messages) {
     const s = getHeader(m, 'Subject') || '';
     if (parcelPatterns.some(p => p.test(s))) {
-      const generic = s.replace(/[a-zA-Z0-9]*\d[a-zA-Z0-9]*/g, '#').replace(/\s+/g, ' ').trim();
+      const generic = s.replace(/\S*\d\S*/g, '#').replace(/#+/g, '#').replace(/\s+/g, ' ').trim();
       counts.set(generic, (counts.get(generic) || 0) + 1);
     }
   }
-  const items = [...counts.entries()]
-    .map(([subject, count]) => ({ subject, count }))
-    .sort((a, b) => b.count - a.count);
+  const items = [...counts.entries()].map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 
@@ -354,19 +350,13 @@ function processInvites(inviteMsgs: MessageMetadata[], allMessages: MessageMetad
 }
 
 function processRedundant(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const threadCounts = new Map<string, number>();
+  const threadCounts = new Map<string, { subject: string; count: number }>();
   for (const m of messages) {
-    if (m.threadId) threadCounts.set(m.threadId, (threadCounts.get(m.threadId) || 0) + 1);
+    const tid = m.threadId || m.id;
+    const t = threadCounts.get(tid);
+    if (t) t.count++; else threadCounts.set(tid, { subject: getHeader(m, 'Subject'), count: 1 });
   }
-  const redundantThreadIds = new Set([...threadCounts.entries()].filter(([_, c]) => c > 5).map(([id]) => id));
-  const subjects = new Map<string, number>();
-  for (const m of messages) {
-    if (m.threadId && redundantThreadIds.has(m.threadId)) {
-      const s = getHeader(m, 'Subject').replace(/^Re:\s*/i, '');
-      subjects.set(s, (subjects.get(s) || 0) + 1);
-    }
-  }
-  const items = [...subjects.entries()].map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
+  const items = [...threadCounts.values()].filter(t => t.count > 3).map(t => ({ subject: t.subject, count: t.count })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 
@@ -377,36 +367,23 @@ function processOldest(messages: MessageMetadata[], totalFetched: number, errorC
       subject: getHeader(m, 'Subject') || '(no subject)', 
       from: getHeader(m, 'From'), 
       sizeEstimate: new Date(getHeader(m, 'Date')).getTime(),
-      snippet: m.snippet // Added snippet here
+      snippet: m.snippet
     }))
     .sort((a, b) => a.sizeEstimate - b.sizeEstimate);
   return { items, totalFetched, errorCount };
 }
 
-export async function deleteEmailsByQuery(
-  token: string,
-  query: string,
-): Promise<{ success: boolean; count: number }> {
+export async function deleteEmailsByQuery(token: string, query: string): Promise<{ success: boolean; count: number }> {
   const ids = await listAllMessageIds(token, query);
   if (ids.length === 0) return { success: true, count: 0 };
-
-  const chunks = [];
   for (let i = 0; i < ids.length; i += 1000) {
-    chunks.push(ids.slice(i, i + 1000));
-  }
-
-  for (const chunk of chunks) {
     const res = await fetch(`${GMAIL_API}/messages/batchDelete`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ids: chunk }),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: ids.slice(i, i + 1000) }),
     });
     if (!res.ok) throw new Error(`Batch delete failed: ${res.status}`);
   }
-
   return { success: true, count: ids.length };
 }
 
