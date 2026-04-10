@@ -175,7 +175,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           } @else {
             <ol class="chart">
               @for (item of visibleHeaviest(); track $index) {
-                <li class="chart__row chart__row--simple">
+                <li class="chart__row chart__row--clickable" 
+                    role="button" tabindex="0"
+                    (click)="searchFilter('id:' + item.id)">
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -193,7 +195,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           } @else {
             <ol class="chart">
               @for (item of visibleRepeated(); track $index) {
-                <li class="chart__row chart__row--simple">
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -211,7 +215,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             <p class="filters__desc">Grouped delivery notifications.</p>
             <ol class="chart">
               @for (item of visibleParcels(); track $index) {
-                <li class="chart__row chart__row--simple">
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchFilter(item.subject)">
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -229,7 +235,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             <p class="filters__desc">Emails older than 1 year in your inbox.</p>
             <ol class="chart">
               @for (item of visibleOld(); track $index) {
-                <li class="chart__row chart__row--simple">
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -246,7 +254,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             <p class="filters__desc">Past calendar invites and .ics files.</p>
             <ol class="chart">
               @for (item of visibleInvites(); track $index) {
-                <li class="chart__row chart__row--simple">
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -263,7 +273,9 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             <p class="filters__desc">Long threads (> 3 messages) in your inbox.</p>
             <ol class="chart">
               @for (item of visibleRedundant(); track $index) {
-                <li class="chart__row chart__row--simple">
+                <li class="chart__row chart__row--clickable"
+                    role="button" tabindex="0"
+                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -391,10 +403,10 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
       display: flex;
       border-bottom: 1px solid #e0e0e0;
       overflow-x: auto;
-      scrollbar-width: none; /* Firefox */
-      -ms-overflow-style: none; /* IE/Edge */
+      scrollbar-width: none;
+      -ms-overflow-style: none;
     }
-    .stats__tabs::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+    .stats__tabs::-webkit-scrollbar { display: none; }
 
     .stats__tabs button {
       flex: 0 0 auto; padding: 0.7rem 1rem; border: none; background: transparent;
@@ -669,6 +681,13 @@ export class StatsComponent implements OnInit, OnDestroy {
   });
 
   protected readonly visibleSenders = computed(() => this.senders().slice(0, this.displayCount()));
+  protected readonly heaviestVisible = computed(() => this.heaviest().slice(0, this.displayCount()));
+  protected readonly repeatedVisible = computed(() => this.repeated().slice(0, this.displayCount()));
+  protected readonly parcelsVisible = computed(() => this.parcels().slice(0, this.displayCount()));
+  protected readonly oldVisible = computed(() => this.oldEmails().slice(0, this.displayCount()));
+  protected readonly invitesVisible = computed(() => this.pastInvites().slice(0, this.displayCount()));
+  protected readonly redundantVisible = computed(() => this.redundantThreads().slice(0, this.displayCount()));
+
   protected readonly visibleHeaviest = computed(() => this.heaviest().slice(0, this.displayCount()));
   protected readonly visibleRepeated = computed(() => this.repeated().slice(0, this.displayCount()));
   protected readonly visibleParcels = computed(() => this.parcels().slice(0, this.displayCount()));
@@ -676,12 +695,11 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly visibleInvites = computed(() => this.pastInvites().slice(0, this.displayCount()));
   protected readonly visibleRedundant = computed(() => this.redundantThreads().slice(0, this.displayCount()));
 
-  protected readonly heaviestVisible = computed(() => this.heaviest().slice(0, this.displayCount()));
-  protected readonly repeatedVisible = computed(() => this.repeated().slice(0, this.displayCount()));
-  protected readonly parcelsVisible = computed(() => this.parcels().slice(0, this.displayCount()));
-  protected readonly oldVisible = computed(() => this.oldEmails().slice(0, this.displayCount()));
-  protected readonly invitesVisible = computed(() => this.pastInvites().slice(0, this.displayCount()));
-  protected readonly redundantVisible = computed(() => this.redundantThreads().slice(0, this.displayCount()));
+  protected readonly heaviestMax = computed(() => Math.max(1, ...this.heaviest().map(i => i.sizeEstimate)));
+  protected readonly repeatedMax = computed(() => Math.max(1, ...this.repeated().map(i => i.count)));
+  protected readonly parcelsMax = computed(() => Math.max(1, ...this.parcels().map(i => i.count)));
+  protected readonly oldMax = computed(() => Math.max(1, ...this.oldEmails().map(i => i.count)));
+  protected readonly redundantMax = computed(() => Math.max(1, ...this.redundantThreads().map(i => i.count)));
 
   protected readonly hasMore = computed(() => {
     const tab = this.activeTab();
@@ -742,14 +760,28 @@ export class StatsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     chrome.storage.local.get('custom_filters', (data) => {
-      const stored = data['custom_filters'];
-      if (stored && Array.isArray(stored)) {
-        this.customFilters.set(stored);
+      let filters = data['custom_filters'] as QuickFilter[] | undefined;
+      const otpFilter: QuickFilter = { 
+        id: '3', 
+        label: 'Security Codes (OTP)', 
+        query: 'subject:(code OR otp OR verification OR "mot de passe" OR sécurité OR security)' 
+      };
+
+      if (filters && Array.isArray(filters)) {
+        // Migration: Add OTP filter if missing
+        if (!filters.find(f => f.id === '3' || f.label.includes('OTP'))) {
+          filters = [...filters, otpFilter];
+          this.customFilters.set(filters);
+          this.saveFiltersToStorage();
+        } else {
+          this.customFilters.set(filters);
+        }
       } else {
+        // Default filters for new users
         const defaults: QuickFilter[] = [
           { id: '1', label: 'Newsletters', query: 'newsletter' },
           { id: '2', label: 'Unsubscribe links', query: 'unsubscribe OR "se désinscrire" OR "se désabonner"' },
-          { id: '3', label: 'Security Codes (OTP)', query: 'subject:(code OR otp OR verification OR "mot de passe" OR sécurité OR security)' }
+          otpFilter
         ];
         this.customFilters.set(defaults);
         this.saveFiltersToStorage();
