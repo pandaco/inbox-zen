@@ -21,7 +21,7 @@ function formatTimeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 'old' | 'invites' | 'redundant' | 'challenge';
+type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 'invites' | 'redundant' | 'challenge';
 
 @Component({
   selector: 'app-stats',
@@ -65,16 +65,12 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
             [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
             Heaviest
           </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'otp'"
-            [class.active]="activeTab() === 'otp'" (click)="setTab('otp')" title="Expired verification codes">
-            OTP
-          </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
             [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Parcel tracking">
             Parcels
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'old'"
-            [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 2 years without label">
+            [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 1 year in Inbox">
             Old
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
@@ -202,23 +198,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
                       <span class="chart__value">{{ item.count }}</span>
-                    </div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
-        } @else if (activeTab() === 'otp') {
-          @if (visibleOTPs().length === 0) {
-            <p class="stats__empty">No expired verification codes found.</p>
-          } @else {
-            <p class="filters__desc">Verification codes older than 24h.</p>
-            <ol class="chart">
-              @for (item of visibleOTPs(); track $index) {
-                <li class="chart__row chart__row--simple">
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
                     </div>
                   </div>
                 </li>
@@ -655,7 +634,6 @@ export class StatsComponent implements OnInit, OnDestroy {
   });
   protected readonly heaviest = computed(() => this.stats()?.heaviestEmails.items ?? []);
   protected readonly repeated = computed(() => this.stats()?.repeatedSubjects.items ?? []);
-  protected readonly otps = computed(() => this.stats()?.expiredOTPs.items ?? []);
   protected readonly parcels = computed(() => this.stats()?.parcelNotifications.items ?? []);
   protected readonly oldEmails = computed(() => this.stats()?.oldEmails.items ?? []);
   protected readonly pastInvites = computed(() => this.stats()?.pastInvites.items ?? []);
@@ -668,7 +646,6 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (!s) return 0;
     if (tab === 'unread') return s.unreadSenders.totalFetched;
     if (tab === 'repeated') return s.repeatedSubjects.totalFetched;
-    if (tab === 'otp') return s.expiredOTPs.totalFetched;
     if (tab === 'parcels') return s.parcelNotifications.totalFetched;
     if (tab === 'old') return s.oldEmails.totalFetched;
     if (tab === 'invites') return s.pastInvites.totalFetched;
@@ -683,7 +660,6 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (!s) return 0;
     if (tab === 'unread') return s.unreadSenders.errorCount;
     if (tab === 'repeated') return s.repeatedSubjects.errorCount;
-    if (tab === 'otp') return s.expiredOTPs.errorCount;
     if (tab === 'parcels') return s.parcelNotifications.errorCount;
     if (tab === 'old') return s.oldEmails.errorCount;
     if (tab === 'invites') return s.pastInvites.errorCount;
@@ -695,11 +671,17 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly visibleSenders = computed(() => this.senders().slice(0, this.displayCount()));
   protected readonly visibleHeaviest = computed(() => this.heaviest().slice(0, this.displayCount()));
   protected readonly visibleRepeated = computed(() => this.repeated().slice(0, this.displayCount()));
-  protected readonly visibleOTPs = computed(() => this.otps().slice(0, this.displayCount()));
   protected readonly visibleParcels = computed(() => this.parcels().slice(0, this.displayCount()));
   protected readonly visibleOld = computed(() => this.oldEmails().slice(0, this.displayCount()));
   protected readonly visibleInvites = computed(() => this.pastInvites().slice(0, this.displayCount()));
   protected readonly visibleRedundant = computed(() => this.redundantThreads().slice(0, this.displayCount()));
+
+  protected readonly heaviestVisible = computed(() => this.heaviest().slice(0, this.displayCount()));
+  protected readonly repeatedVisible = computed(() => this.repeated().slice(0, this.displayCount()));
+  protected readonly parcelsVisible = computed(() => this.parcels().slice(0, this.displayCount()));
+  protected readonly oldVisible = computed(() => this.oldEmails().slice(0, this.displayCount()));
+  protected readonly invitesVisible = computed(() => this.pastInvites().slice(0, this.displayCount()));
+  protected readonly redundantVisible = computed(() => this.redundantThreads().slice(0, this.displayCount()));
 
   protected readonly hasMore = computed(() => {
     const tab = this.activeTab();
@@ -709,7 +691,6 @@ export class StatsComponent implements OnInit, OnDestroy {
       tab === 'unread' ? this.senders().length :
       tab === 'heaviest' ? this.heaviest().length :
       tab === 'repeated' ? this.repeated().length :
-      tab === 'otp' ? this.otps().length :
       tab === 'parcels' ? this.parcels().length :
       tab === 'old' ? this.oldEmails().length :
       tab === 'invites' ? this.pastInvites().length :
@@ -765,11 +746,12 @@ export class StatsComponent implements OnInit, OnDestroy {
       if (stored && Array.isArray(stored)) {
         this.customFilters.set(stored);
       } else {
-        // Default filters
-        this.customFilters.set([
+        const defaults: QuickFilter[] = [
           { id: '1', label: 'Newsletters', query: 'newsletter' },
-          { id: '2', label: 'Unsubscribe links', query: 'unsubscribe OR "se désinscrire" OR "se désabonner"' }
-        ]);
+          { id: '2', label: 'Unsubscribe links', query: 'unsubscribe OR "se désinscrire" OR "se désabonner"' },
+          { id: '3', label: 'Security Codes (OTP)', query: 'subject:(code OR otp OR verification OR "mot de passe" OR sécurité OR security)' }
+        ];
+        this.customFilters.set(defaults);
         this.saveFiltersToStorage();
       }
     });
