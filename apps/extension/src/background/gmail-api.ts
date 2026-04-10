@@ -4,9 +4,9 @@ export type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats };
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const BATCH_API = 'https://www.googleapis.com/batch/gmail/v1';
-const BATCH_SIZE = 50;       // quota units per batch = 50 * 5 = 250 (max/s limit)
-const BATCH_DELAY_MS = 1100; // slightly above 1s to stay within quota
-const MAX_RETRIES = 4;
+const BATCH_SIZE = 40;       // Safer batch size for Gmail rate limits
+const BATCH_DELAY_MS = 1200; // Increased delay to stay under quota
+const MAX_RETRIES = 5;
 
 async function fetchJson<T>(url: string, token: string): Promise<T> {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -94,17 +94,22 @@ async function fetchMetadataBatch(
   metadataHeaders: string[],
 ): Promise<MessageMetadata[]> {
   const boundary = `batch_${Math.random().toString(36).slice(2)}`;
-  const headerParams = metadataHeaders
-    .map(h => `metadataHeaders=${encodeURIComponent(h)}`)
-    .join('&');
-  const fields = 'id,threadId,sizeEstimate,payload/headers';
+  
+  // Strict fields selection to reduce response size and latency
+  const fields = 'id,threadId,sizeEstimate,payload(headers)';
 
   const body = ids
     .map(id => {
+      const params = new URLSearchParams({
+        format: 'metadata',
+        fields: fields,
+      });
+      metadataHeaders.forEach(h => params.append('metadataHeaders', h));
+
       return (
         `--${boundary}\r\n` +
         `Content-Type: application/http\r\n\r\n` +
-        `GET ${GMAIL_API}/messages/${id}?format=metadata&${headerParams}&fields=${encodeURIComponent(fields)}\r\n`
+        `GET /gmail/v1/users/me/messages/${id}?${params.toString()}\r\n\r\n`
       );
     })
     .join('') + `--${boundary}--\r\n`;
@@ -118,7 +123,12 @@ async function fetchMetadataBatch(
     body,
   });
 
-  if (!res.ok) throw new Error(`Batch request failed: ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 429 || res.status === 503) {
+      throw { status: res.status, message: 'Rate limited' };
+    }
+    throw new Error(`Batch request failed: ${res.status}`);
+  }
   const text = await res.text();
   const contentType = res.headers.get('Content-Type') || '';
   return parseBatchResponse(text, contentType);
@@ -146,10 +156,17 @@ async function fetchAllMetadata(
         messages.push(...results);
         errorCount += chunk.length - results.length;
         success = true;
-      } catch (err) {
+      } catch (err: any) {
         retries++;
-        if (retries === MAX_RETRIES) throw err;
-        await sleep(BATCH_DELAY_MS * retries);
+        if (retries < MAX_RETRIES) {
+          // Exponential backoff: 1s, 2s, 4s, 8s...
+          const waitTime = Math.pow(2, retries) * 1000 + (Math.random() * 500);
+          console.warn(`[Gmail API] Rate limited or error. Retrying in ${Math.round(waitTime)}ms...`, err);
+          await sleep(waitTime);
+        } else {
+          console.error(`[Gmail API] Failed chunk after ${MAX_RETRIES} retries.`, err);
+          errorCount += chunk.length;
+        }
       }
     }
 
