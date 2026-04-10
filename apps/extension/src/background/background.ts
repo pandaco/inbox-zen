@@ -9,7 +9,7 @@ const SCOPES = [
 ].join(' ');
 
 const TOKEN_KEY = 'gmail_access_token';
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_KEY = 'cache_global_stats';
 
 interface CacheEntry {
