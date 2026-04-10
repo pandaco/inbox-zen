@@ -197,8 +197,14 @@ chrome.runtime.onConnect.addListener((port) => {
       }
     }
 
-    const onProgress = (fetched: number, total: number): void =>
-      send({ type: 'PROGRESS', fetched, total });
+    const onProgress = (fetched: number, total: number, partialData?: GlobalStats): void => {
+      send({ 
+        type: 'PROGRESS', 
+        fetched, 
+        total,
+        data: partialData // Send partial results if available
+      } as any);
+    };
 
     getGlobalStats(token, onProgress)
       .then(async data => {

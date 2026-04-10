@@ -73,6 +73,7 @@ export interface ProgressMessage {
   type: 'PROGRESS';
   fetched: number;
   total: number;
+  data?: GlobalStats;
 }
 
 export interface ResultMessage<T> {

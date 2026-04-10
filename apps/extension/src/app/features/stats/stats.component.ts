@@ -909,6 +909,12 @@ export class StatsComponent implements OnInit, OnDestroy {
         if (msg.type === 'PROGRESS') {
           this.loadFetched.set(msg.fetched);
           this.loadTotal.set(msg.total);
+          if (msg.data) {
+            this.stats.set(msg.data);
+            if (msg.data.oldestEmails.items.length > 0) {
+              this.oldestEmails.set(msg.data.oldestEmails.items);
+            }
+          }
         } else if (msg.type === 'RESULT') {
           this.isLoading.set(false);
           if (!msg.success) {

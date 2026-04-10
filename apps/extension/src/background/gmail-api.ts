@@ -134,7 +134,7 @@ async function fetchMetadataBatch(
   return parseBatchResponse(text, contentType);
 }
 
-export type ProgressCallback = (fetched: number, total: number) => void;
+export type ProgressCallback = (fetched: number, total: number, partialData?: GlobalStats) => void;
 
 async function fetchAllMetadata(
   token: string,
@@ -144,6 +144,7 @@ async function fetchAllMetadata(
 ): Promise<{ messages: MessageMetadata[]; errorCount: number }> {
   const messages: MessageMetadata[] = [];
   let errorCount = 0;
+  let lastPartialSentAt = Date.now();
 
   for (let i = 0; i < ids.length; i += BATCH_SIZE) {
     const chunk = ids.slice(i, i + BATCH_SIZE);
@@ -170,7 +171,15 @@ async function fetchAllMetadata(
       }
     }
 
-    onProgress?.(messages.length, ids.length);
+    // Send partial results every 5 seconds or on last chunk
+    const isLast = i + BATCH_SIZE >= ids.length;
+    const shouldSendPartial = (Date.now() - lastPartialSentAt > 5000) || isLast;
+    
+    if (onProgress) {
+      onProgress(messages.length, ids.length, shouldSendPartial ? (true as any) : undefined);
+      if (shouldSendPartial) lastPartialSentAt = Date.now();
+    }
+
     if (i + BATCH_SIZE < ids.length) await sleep(BATCH_DELAY_MS);
   }
 
@@ -184,38 +193,56 @@ export async function getGlobalStats(
   const now = Date.now();
   
   // 1. Surgical parallel ID fetching, strictly restricted to INBOX
-  // We fetch a bit more for old/heavy to be thorough, but we limit to avoid quota blast
   const [unreadIds, heavyIds, oldIds] = await Promise.all([
     listAllMessageIds(token, 'in:inbox is:unread'),
     listAllMessageIds(token, 'in:inbox (has:attachment OR larger:100kb)'),
     listAllMessageIds(token, 'in:inbox older_than:1y')
   ]);
 
-  // 2. Mutualize IDs
+  const unreadSet = new Set(unreadIds);
+  const heavySet = new Set(heavyIds);
+  const oldSet = new Set(oldIds);
   const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds]));
-  
-  // 3. One single crawl of metadata
+
+  // Reusable calculation logic for partial and final results
+  const calculateStats = (msgs: MessageMetadata[], fetchedCount: number, currentErrors: number): GlobalStats => {
+    const filter = (idSet: Set<string>): MessageMetadata[] => msgs.filter(m => idSet.has(m.id));
+    return {
+      unreadSenders: processUnreadSenders(filter(unreadSet), fetchedCount, currentErrors),
+      heaviestEmails: processHeaviest(filter(heavySet), fetchedCount, currentErrors),
+      repeatedSubjects: processRepeatedSubjects(msgs, fetchedCount, currentErrors),
+      expiredOTPs: processOTPs(msgs, fetchedCount, currentErrors),
+      parcelNotifications: processParcels(msgs, fetchedCount, currentErrors),
+      oldEmails: processOld(filter(oldSet), fetchedCount, currentErrors),
+      pastInvites: processInvites(msgs, fetchedCount, currentErrors),
+      redundantThreads: processRedundant(msgs, fetchedCount, currentErrors),
+      oldestEmails: processOldest(msgs, fetchedCount, currentErrors),
+    };
+  };
+
+  // 3. One single crawl of metadata with partial updates
   const { messages, errorCount } = await fetchAllMetadata(
     token, 
     allIds, 
     ['From', 'Subject', 'Date', 'List-Unsubscribe'], 
-    onProgress
+    (fetched, total, shouldCompute) => {
+      if (onProgress) {
+        const partial = shouldCompute ? calculateStats(messages, fetched, errorCount) : undefined;
+        onProgress(fetched, total, partial);
+      }
+    }
   );
 
-  const msgMap = new Map(messages.map(m => [m.id, m]));
+  return calculateStats(messages, allIds.length, errorCount);
+}
 
-  // Helper to filter results
-  const getSubSet = (ids: string[]) => ids.map(id => msgMap.get(id)).filter((m): m is MessageMetadata => !!m);
+// --- Specific Processors ---
 
-  const unreadMsgs = getSubSet(unreadIds);
-  const heavyMsgs = getSubSet(heavyIds);
-  const oldMsgs = getSubSet(oldIds);
-
-  // --- Calculations ---
-
-  // A. Unread Senders & Noise Score
+function processUnreadSenders(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SenderStat> {
+  const now = Date.now();
   const senderCounts = new Map<string, { name: string; count: number; unsubscribeUrl?: string; firstDate: number; lastDate: number }>();
-  for (const m of unreadMsgs) {
+  
+  for (const m of messages) {
     const from = getHeader(m, 'From');
     if (!from) continue;
     const { name, email } = parseSender(from);
@@ -234,7 +261,8 @@ export async function getGlobalStats(
       senderCounts.set(email, { name, count: 1, unsubscribeUrl: unsubUrl, firstDate: date, lastDate: date });
     }
   }
-  const unreadSenders = [...senderCounts.entries()]
+
+  const items = [...senderCounts.entries()]
     .map(([email, s]) => {
       const days = Math.max(1, (s.lastDate - s.firstDate) / 86400000);
       const score = (s.count / days) * ( (now - s.lastDate) < 604800000 ? 2 : 1) * Math.log10(s.count + 1);
@@ -242,79 +270,100 @@ export async function getGlobalStats(
     })
     .sort((a, b) => b.count - a.count);
 
-  // B. Heaviest
-  const heaviestEmails = heavyMsgs
+  return { items, totalFetched, errorCount };
+}
+
+function processHeaviest(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SizeStat> {
+  const items = messages
     .map(m => ({ subject: getHeader(m, 'Subject') || '(no subject)', from: getHeader(m, 'From'), sizeEstimate: m.sizeEstimate }))
     .sort((a, b) => b.sizeEstimate - a.sizeEstimate);
+  return { items, totalFetched, errorCount };
+}
 
-  // C. Repeated Subjects & Redundant Threads
-  const subCounts = new Map<string, number>();
-  const threadCounts = new Map<string, { subject: string; count: number }>();
-  for (const m of unreadMsgs) {
-    const subject = getHeader(m, 'Subject') || '(no subject)';
-    subCounts.set(subject, (subCounts.get(subject) || 0) + 1);
-    
-    const threadId = m.threadId || m.id;
-    const t = threadCounts.get(threadId);
-    if (t) t.count++; else threadCounts.set(threadId, { subject, count: 1 });
-  }
-  const repeatedSubjects = [...subCounts.entries()].map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
-  const redundantThreads = [...threadCounts.values()].filter(t => t.count > 3).sort((a, b) => b.count - a.count);
-
-  // D. OTP & Parcels & Old & Invites
-  const expiredOTPs: SubjectStat[] = [];
-  const oldEmails: SubjectStat[] = [];
-  const pastInvites: SubjectStat[] = [];
-
-  const otpRegex = /verification|OTP|one-time password|code/i;
-  const parcelRegex = /shipping|delivery|colis|livraison|expédition/i;
-  const inviteRegex = /invite\.ics/i;
-
-  const parcelCounts = new Map<string, number>();
-
+function processRepeatedSubjects(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const counts = new Map<string, number>();
   for (const m of messages) {
-    const subject = getHeader(m, 'Subject') || '';
-    const date = new Date(getHeader(m, 'Date') || now).getTime();
-
-    if (otpRegex.test(subject) && (now - date) > 86400000) expiredOTPs.push({ subject, count: 1 });
-    if (parcelRegex.test(subject)) {
-      // Generalize subject by replacing any blob of characters containing a digit with #
-      // This groups tracking IDs (6Z123...), order numbers, and dates together.
-      const generalizedSubject = subject
-        .replace(/\S*\d\S*/g, '#')
-        .replace(/#+/g, '#') // Collapse multiple adjacent #
-        .replace(/\s+/g, ' ') // Clean up multiple spaces
-        .trim();
-      parcelCounts.set(generalizedSubject, (parcelCounts.get(generalizedSubject) || 0) + 1);
-    }
-    if (inviteRegex.test(subject) && (now - date) > 604800000) pastInvites.push({ subject, count: 1 });
-    // Old: older than 1 year (matching our query)
-    if ((now - date) > (365 * 86400000)) oldEmails.push({ subject, count: 1 });
+    const s = getHeader(m, 'Subject') || '(no subject)';
+    counts.set(s, (counts.get(s) || 0) + 1);
   }
-
-  const parcelNotifications = [...parcelCounts.entries()]
+  const items = [...counts.entries()]
+    .filter(([_, count]) => count > 2)
     .map(([subject, count]) => ({ subject, count }))
     .sort((a, b) => b.count - a.count);
+  return { items, totalFetched, errorCount };
+}
 
-  // E. Oldest for Challenge (take the last 50 from our 'old' subset)
-  const oldestEmailsResult = oldMsgs.reverse().slice(0, 50).map(m => ({
-    subject: getHeader(m, 'Subject') || '(no subject)',
-    from: getHeader(m, 'From'),
-    sizeEstimate: m.sizeEstimate,
-    id: m.id
-  }));
+function processOTPs(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const otpPatterns = [/code/i, /otp/i, /verification/i, /votre mot de passe/i, /sécurité/i, /security/i];
+  const items = messages
+    .filter(m => {
+      const s = getHeader(m, 'Subject') || '';
+      const date = new Date(getHeader(m, 'Date')).getTime();
+      return otpPatterns.some(p => p.test(s)) && (Date.now() - date > 86400000);
+    })
+    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
+  return { items, totalFetched, errorCount };
+}
 
-  return {
-    unreadSenders: { items: unreadSenders, totalFetched: unreadMsgs.length, errorCount },
-    heaviestEmails: { items: heaviestEmails, totalFetched: heavyMsgs.length, errorCount },
-    repeatedSubjects: { items: repeatedSubjects, totalFetched: unreadMsgs.length, errorCount },
-    expiredOTPs: { items: expiredOTPs, totalFetched: expiredOTPs.length, errorCount },
-    parcelNotifications: { items: parcelNotifications, totalFetched: parcelNotifications.length, errorCount },
-    oldEmails: { items: oldEmails, totalFetched: oldEmails.length, errorCount },
-    pastInvites: { items: pastInvites, totalFetched: pastInvites.length, errorCount },
-    redundantThreads: { items: redundantThreads, totalFetched: redundantThreads.length, errorCount },
-    oldestEmails: { items: oldestEmailsResult, totalFetched: oldMsgs.length, errorCount }
-  };
+function processParcels(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const parcelPatterns = [/colis/i, /livraison/i, /delivery/i, /shipping/i, /expédition/i, /command/i, /order/i, /envoyé/i];
+  const counts = new Map<string, number>();
+  for (const m of messages) {
+    const s = getHeader(m, 'Subject') || '';
+    if (parcelPatterns.some(p => p.test(s))) {
+      const generic = s.replace(/[a-zA-Z0-9]*\d[a-zA-Z0-9]*/g, '#').replace(/\s+/g, ' ').trim();
+      counts.set(generic, (counts.get(generic) || 0) + 1);
+    }
+  }
+  const items = [...counts.entries()]
+    .map(([subject, count]) => ({ subject, count }))
+    .sort((a, b) => b.count - a.count);
+  return { items, totalFetched, errorCount };
+}
+
+function processOld(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const items = messages.map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
+  return { items, totalFetched, errorCount };
+}
+
+function processInvites(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const items = messages
+    .filter(m => {
+      const s = getHeader(m, 'Subject') || '';
+      const date = new Date(getHeader(m, 'Date')).getTime();
+      return (s.includes('Invitation') || s.includes('Accepted') || s.includes('Event')) && (Date.now() - date > 86400000 * 7);
+    })
+    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
+  return { items, totalFetched, errorCount };
+}
+
+function processRedundant(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
+  const threadCounts = new Map<string, number>();
+  for (const m of messages) {
+    if (m.threadId) threadCounts.set(m.threadId, (threadCounts.get(m.threadId) || 0) + 1);
+  }
+  const redundantThreadIds = new Set([...threadCounts.entries()].filter(([_, c]) => c > 5).map(([id]) => id));
+  const subjects = new Map<string, number>();
+  for (const m of messages) {
+    if (m.threadId && redundantThreadIds.has(m.threadId)) {
+      const s = getHeader(m, 'Subject').replace(/^Re:\s*/i, '');
+      subjects.set(s, (subjects.get(s) || 0) + 1);
+    }
+  }
+  const items = [...subjects.entries()].map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
+  return { items, totalFetched, errorCount };
+}
+
+function processOldest(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SizeStat> {
+  const items = messages
+    .map(m => ({ 
+      id: m.id, 
+      subject: getHeader(m, 'Subject') || '(no subject)', 
+      from: getHeader(m, 'From'), 
+      sizeEstimate: new Date(getHeader(m, 'Date')).getTime() 
+    }))
+    .sort((a, b) => a.sizeEstimate - b.sizeEstimate);
+  return { items, totalFetched, errorCount };
 }
 
 export async function deleteEmailsByQuery(
