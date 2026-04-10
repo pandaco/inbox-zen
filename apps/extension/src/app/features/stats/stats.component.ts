@@ -94,7 +94,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
         </nav>
       }
 
-      @if (!isLoading() && totalFetched() > 0) {
+      @if (totalFetched() > 0) {
         <div class="stats__meta" [class.stats__meta--error]="errorCount() > 0">
           {{ totalFetched() }} emails analysed
           @if (errorCount() > 0) {
@@ -104,7 +104,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
       }
 
       <div class="stats__body" #body>
-        @if (isLoading()) {
+        @if (isLoading() && totalFetched() === 0) {
           <div class="stats__loading" role="status" aria-label="Loading">
             <span class="stats__spinner"></span>
             @if (loadTotal() > 0) {
@@ -120,12 +120,26 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
               <p class="stats__loading-text">Scanning Inbox (read & unread)…</p>
             }
           </div>
-        } @else if (error()) {
-          <div class="stats__error" role="alert">
-            <p>{{ error() }}</p>
-            <button class="stats__retry" (click)="load(true)">Retry</button>
-          </div>
-        } @else if (activeTab() === 'unread') {
+        } @else {
+          @if (isLoading()) {
+            <div class="stats__progress-overlay">
+              <div class="stats__load-bar-bg stats__load-bar-bg--mini">
+                <div class="stats__load-bar"
+                  [style.width.%]="(loadFetched() / loadTotal()) * 100">
+                </div>
+              </div>
+              <p class="stats__loading-text stats__loading-text--mini">
+                Updating results... {{ loadFetched() }} / {{ loadTotal() }}
+              </p>
+            </div>
+          }
+
+          @if (error()) {
+            <div class="stats__error" role="alert">
+              <p>{{ error() }}</p>
+              <button class="stats__retry" (click)="load(true)">Retry</button>
+            </div>
+          } @else if (activeTab() === 'unread') {
           @if (visibleSenders().length === 0) {
             <p class="stats__empty">No unread emails found.</p>
           } @else {
@@ -287,6 +301,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
         @if (hasMore() && activeTab() !== 'filters' && activeTab() !== 'challenge') {
           <div #sentinel class="stats__sentinel" aria-hidden="true"></div>
         }
+      }
       </div>
 
       <footer class="stats__footer">
@@ -367,13 +382,22 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'otp' | 'parcels' | 
       align-items: center; gap: 0.75rem; padding: 3rem 1.5rem 2rem;
     }
     .stats__loading-text { margin: 0; font-size: 0.82rem; color: #5f6368; }
+    .stats__loading-text--mini { font-size: 0.75rem; font-weight: 600; text-align: center; margin-top: 0.3rem; }
     .stats__load-bar-bg {
       width: 100%; height: 4px;
       background: #e0e0e0; border-radius: 2px; overflow: hidden;
     }
+    .stats__load-bar-bg--mini { height: 3px; border-radius: 0; }
     .stats__load-bar {
       height: 100%; background: #1a73e8; border-radius: 2px;
       transition: width 0.3s ease;
+    }
+    .stats__progress-overlay {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(4px);
+      padding: 0.6rem 1.2rem;
+      border-bottom: 1px solid #e0e0e0;
     }
     .stats__spinner {
       width: 28px; height: 28px;
