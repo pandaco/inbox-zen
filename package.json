@@ -1,12 +1,15 @@
 {
   "name": "inbox-zen",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "license": "MIT",
   "scripts": {
     "start": "nx serve extension",
     "build": "nx build extension",
     "test": "nx test extension",
-    "lint": "nx lint extension"
+    "lint": "nx lint extension",
+    "release": "nx release",
+    "release:dry": "nx release --dry-run",
+    "release:first": "nx release --first-release"
   },
   "private": true,
   "devDependencies": {

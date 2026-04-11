@@ -40,14 +40,25 @@
     }
   },
   "release": {
+    "projects": ["inbox-zen", "extension"],
     "version": {
+      "generatorOptions": {
+        "fallbackCurrentVersionResolver": "disk"
+      },
       "conventionalCommits": true
     },
+    "tagFormat": "v{version}",
     "changelog": {
-      "projectChangelogs": true
-    },
-    "projects": [
-      "extension"
-    ]
+      "workspaceChangelog": {
+        "renderOptions": {
+          "authors": false
+        }
+      },
+      "projectChangelogs": {
+        "renderOptions": {
+          "authors": false
+        }
+      }
+    }
   }
 }
