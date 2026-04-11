@@ -2,8 +2,9 @@ import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, effe
 import { Router } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
-import { StatsService, SenderStat, SizeStat, SubjectStat, GlobalStats, QuickFilter } from './stats.service';
+import { StatsService, SenderStat, SizeStat, GlobalStats, QuickFilter } from './stats.service';
 import { GmailSearchService } from '../../core/gmail-search/gmail-search.service';
+import pkg from '../../../../package.json';
 
 function formatSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -30,7 +31,10 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
   template: `
     <div class="stats">
       <header class="stats__header">
-        <h1 class="stats__title">Inbox Zen</h1>
+        <h1 class="stats__title">
+          Inbox Zen
+          <span class="stats__version">v{{ version }}</span>
+        </h1>
         <div class="stats__actions">
           <button class="stats__action-btn" (click)="openInNewTab()" aria-label="Open in new tab" title="Open in new tab">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
@@ -382,14 +386,29 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     }
 
     .stats__header {
-      padding: 1rem 1.2rem;
+      padding: 0.8rem 1.2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid #e0e0e0;
     }
 
-    .stats__title { margin: 0; font-size: 1.2rem; font-weight: 600; color: #1a73e8; }
+    .stats__title { 
+      margin: 0; 
+      font-size: 1.1rem; 
+      font-weight: 600; 
+      color: #1a73e8;
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+
+    .stats__version {
+      font-size: 0.65rem;
+      font-weight: 400;
+      color: #9aa0a6;
+      font-family: monospace;
+    }
 
     .stats__actions { display: flex; gap: 0.5rem; }
     .stats__action-btn {
@@ -516,15 +535,15 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     .stats__sentinel { height: 1px; }
 
     .stats__footer {
-      padding: 0.8rem 1.2rem; border-top: 1px solid #e0e0e0;
+      padding: 0.5rem 1.2rem; border-top: 1px solid #e0e0e0;
       display: flex; justify-content: space-between; align-items: center;
       background: #fff;
     }
-    .stats__sync-time { font-size: 0.75rem; color: #5f6368; }
+    .stats__sync-time { font-size: 0.72rem; color: #5f6368; }
     .stats__sync-time--cached { color: #1a73e8; font-weight: 500; }
     .stats__refresh {
-      background: none; border: 1px solid #dadce0; padding: 0.4rem 0.8rem;
-      border-radius: 4px; font-size: 0.8rem; font-weight: 500; color: #3c4043;
+      background: none; border: 1px solid #dadce0; padding: 0.3rem 0.6rem;
+      border-radius: 4px; font-size: 0.75rem; font-weight: 500; color: #3c4043;
       cursor: pointer; font-family: inherit; transition: background 0.2s;
     }
     .stats__refresh:hover:not(:disabled) { background: #f8f9fa; border-color: #1a73e8; color: #1a73e8; }
@@ -617,6 +636,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
   `,
 })
 export class StatsComponent implements OnInit, OnDestroy {
+  protected readonly version = pkg.version;
   protected readonly auth = inject(AuthService);
   private readonly statsService = inject(StatsService);
   private readonly gmailSearch = inject(GmailSearchService);
