@@ -291,7 +291,13 @@ function processUnreadSenders(messages: MessageMetadata[], totalFetched: number,
 
 function processHeaviest(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SizeStat> {
   const items = messages
-    .map(m => ({ subject: getHeader(m, 'Subject') || '(no subject)', from: getHeader(m, 'From'), sizeEstimate: m.sizeEstimate }))
+    .filter(m => !!m.id)
+    .map(m => ({ 
+      id: m.id,
+      subject: getHeader(m, 'Subject') || '(no subject)', 
+      from: getHeader(m, 'From') || '(unknown)', 
+      sizeEstimate: m.sizeEstimate || 0
+    }))
     .sort((a, b) => b.sizeEstimate - a.sizeEstimate);
   return { items, totalFetched, errorCount };
 }

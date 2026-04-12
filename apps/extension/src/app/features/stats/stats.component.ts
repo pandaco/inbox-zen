@@ -70,23 +70,23 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             Heaviest
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
-            [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Parcel tracking">
+            [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Grouped delivery notifications ℹ️">
             Parcels
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'old'"
-            [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 1 year in Inbox">
+            [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 1 year in Inbox ℹ️">
             Old
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
-            [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites">
+            [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites and .ics files ℹ️">
             Invites
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'redundant'"
-            [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Redundant message threads">
+            [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Long threads (> 3 messages) in your inbox ℹ️">
             Redundant
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
-            [class.active]="activeTab() === 'filters'" (click)="setTab('filters')">
+            [class.active]="activeTab() === 'filters'" (click)="setTab('filters')" title="Quick searches to clean up your inbox ℹ️">
             Filters
           </button>
           <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
@@ -96,7 +96,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
         </nav>
       }
 
-      @if (totalFetched() > 0 || isLoading()) {
+      @if (showMeta() && (totalFetched() > 0 || isLoading())) {
         <div class="stats__meta" [class.stats__meta--error]="errorCount() > 0">
           <div class="stats__meta-row">
             <span class="stats__meta-text">
@@ -114,6 +114,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
                 <div class="stats__load-bar" [style.width.%]="(loadFetched() / loadTotal()) * 100"></div>
               </div>
             }
+            <button class="stats__meta-close" (click)="showMeta.set(false)" aria-label="Close info bar">×</button>
           </div>
         </div>
       }
@@ -165,10 +166,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
                       </div>
                     </div>
                   </div>
-                  <button class="chart__clear" (click)="$event.stopPropagation(); clearSender(item)"
-                          title="Delete all unread from this sender" aria-label="Delete all">
-                    🗑️
-                  </button>
                 </li>
               }
             </ol>
@@ -178,10 +175,11 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             <p class="stats__empty">No heavy emails found.</p>
           } @else {
             <ol class="chart">
-              @for (item of visibleHeaviest(); track $index) {
+              @for (item of visibleHeaviest(); track $index; let i = $index) {
                 <li class="chart__row chart__row--clickable" 
                     role="button" tabindex="0"
-                    (click)="searchFilter('id:' + item.id)">
+                    (click)="searchFilter('from:(' + item.from + ') subject:(&quot;' + item.subject + '&quot;)')">
+                  <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
@@ -198,14 +196,18 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
             <p class="stats__empty">No repeated subjects found.</p>
           } @else {
             <ol class="chart">
-              @for (item of visibleRepeated(); track $index) {
+              @for (item of visibleRepeated(); track $index; let i = $index) {
                 <li class="chart__row chart__row--clickable"
                     role="button" tabindex="0"
                     (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
+                  <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
                       <span class="chart__value">{{ item.count }}</span>
+                    </div>
+                    <div class="chart__bar-bg">
+                      <div class="chart__bar" [style.width.%]="(item.count / repeatedMax()) * 100"></div>
                     </div>
                   </div>
                 </li>
@@ -216,16 +218,19 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           @if (visibleParcels().length === 0) {
             <p class="stats__empty">No parcel notifications found.</p>
           } @else {
-            <p class="filters__desc">Grouped delivery notifications.</p>
             <ol class="chart">
-              @for (item of visibleParcels(); track $index) {
+              @for (item of visibleParcels(); track $index; let i = $index) {
                 <li class="chart__row chart__row--clickable"
                     role="button" tabindex="0"
                     (click)="searchFilter(item.subject)">
+                  <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
                       <span class="chart__value">{{ item.count }}</span>
+                    </div>
+                    <div class="chart__bar-bg">
+                      <div class="chart__bar" [style.width.%]="(item.count / parcelsMax()) * 100"></div>
                     </div>
                   </div>
                 </li>
@@ -236,16 +241,17 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           @if (visibleOld().length === 0) {
             <p class="stats__empty">No old emails found.</p>
           } @else {
-            <p class="filters__desc">Emails older than 1 year in your inbox.</p>
             <ol class="chart">
-              @for (item of visibleOld(); track $index) {
+              @for (item of visibleOld(); track $index; let i = $index) {
                 <li class="chart__row chart__row--clickable"
                     role="button" tabindex="0"
                     (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
+                  <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
                     </div>
+                    <div class="chart__from">Inbox message</div>
                   </div>
                 </li>
               }
@@ -255,16 +261,17 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           @if (visibleInvites().length === 0) {
             <p class="stats__empty">No past invitations found.</p>
           } @else {
-            <p class="filters__desc">Past calendar invites and .ics files.</p>
             <ol class="chart">
-              @for (item of visibleInvites(); track $index) {
+              @for (item of visibleInvites(); track $index; let i = $index) {
                 <li class="chart__row chart__row--clickable"
                     role="button" tabindex="0"
                     (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
+                  <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
                     </div>
+                    <div class="chart__from">Calendar invite</div>
                   </div>
                 </li>
               }
@@ -274,16 +281,19 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           @if (visibleRedundant().length === 0) {
             <p class="stats__empty">No redundant threads found.</p>
           } @else {
-            <p class="filters__desc">Long threads (> 3 messages) in your inbox.</p>
             <ol class="chart">
-              @for (item of visibleRedundant(); track $index) {
+              @for (item of visibleRedundant(); track $index; let i = $index) {
                 <li class="chart__row chart__row--clickable"
                     role="button" tabindex="0"
                     (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
+                  <span class="chart__rank">{{ i + 1 }}</span>
                   <div class="chart__info">
                     <div class="chart__label-row">
                       <span class="chart__name">{{ item.subject }}</span>
                       <span class="chart__value">{{ item.count }}</span>
+                    </div>
+                    <div class="chart__bar-bg">
+                      <div class="chart__bar" [style.width.%]="(item.count / redundantMax()) * 100"></div>
                     </div>
                   </div>
                 </li>
@@ -315,7 +325,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           </div>
         } @else if (activeTab() === 'filters') {
           <div class="filters">
-            <p class="filters__desc">Quick searches to clean up your inbox.</p>
             <ul class="filters__list">
               @for (f of customFilters(); track f.id) {
                 <li class="filters__item">
@@ -445,6 +454,11 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     .stats__meta--error { color: #b06000; background: #fef7e0; }
     .stats__meta-row { display: flex; align-items: center; gap: 1rem; }
     .stats__meta-text { flex: 1; font-weight: 500; }
+    .stats__meta-close {
+      background: none; border: none; font-size: 1.2rem; color: #5f6368;
+      cursor: pointer; padding: 0 0.4rem; line-height: 1;
+    }
+    .stats__meta-close:hover { color: #202124; }
 
     .stats__body { flex: 1; overflow-y: auto; padding: 0.75rem 0; position: relative; }
 
@@ -461,6 +475,8 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
       height: 100%; background: #1a73e8; border-radius: 2px;
       transition: width 0.3s ease;
     }
+    .stats__load-bar-bg--mini { width: 60px; }
+
     .stats__spinner {
       width: 28px; height: 28px;
       border: 3px solid #e0e0e0; border-top-color: #1a73e8;
@@ -484,7 +500,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     }
     .chart__row--clickable { cursor: pointer; }
     .chart__row--clickable:hover { background: #f8f9fa; }
-    .chart__row--simple { padding: 0.8rem 1.2rem; }
 
     .chart__rank { font-size: 0.75rem; color: #9aa0a6; min-width: 1.2rem; }
     .chart__info { flex: 1; min-width: 0; }
@@ -522,12 +537,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     }
     .chart__unsub:hover { background: #d2e3fc; }
 
-    .chart__clear {
-      background: none; border: none; font-size: 1rem; cursor: pointer;
-      opacity: 0; transition: opacity 0.2s; padding: 0.4rem; border-radius: 4px;
-    }
-    .chart__row:hover .chart__clear { opacity: 1; background: #fce8e6; }
-
     .chart__from { font-size: 0.75rem; color: #5f6368; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .stats__empty { padding: 3rem 1.5rem; text-align: center; color: #5f6368; font-size: 0.85rem; }
@@ -551,7 +560,6 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
 
     /* Filters Tab */
     .filters { padding: 1rem 1.2rem; }
-    .filters__desc { font-size: 0.85rem; color: #5f6368; margin-bottom: 1rem; }
     .filters__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
     .filters__item {
       display: flex; gap: 0.5rem; align-items: stretch;
@@ -653,6 +661,7 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly error = signal<string | null>(null);
   protected readonly loadFetched = signal(0);
   protected readonly loadTotal = signal(0);
+  protected readonly showMeta = signal(true);
 
   protected readonly displayCount = signal(this.PAGE_SIZE);
   protected readonly globalCachedAt = signal<number | null>(null);
