@@ -1,19 +1,7 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "defaultBase": "main",
-  "tasksRunnerOptions": {
-    "default": {
-      "runner": "nx/tasks-runners/default",
-      "options": {
-        "cacheableOperations": [
-          "build",
-          "test",
-          "lint",
-          "e2e"
-        ]
-      }
-    }
-  },
+  "cacheDirectory": ".nx/cache",
   "targetDefaults": {
     "build": {
       "dependsOn": [
@@ -21,14 +9,18 @@
       ],
       "outputs": [
         "{projectRoot}/dist"
-      ]
+      ],
+      "cache": true
     },
     "test": {
       "dependsOn": [
         "^build"
-      ]
+      ],
+      "cache": true
     },
-    "lint": {},
+    "lint": {
+      "cache": true
+    },
     "@nx/eslint:lint": {
       "cache": true,
       "inputs": [
@@ -42,12 +34,10 @@
   "release": {
     "projects": ["inbox-zen", "extension"],
     "version": {
-      "generatorOptions": {
-        "fallbackCurrentVersionResolver": "disk"
-      },
+      "fallbackCurrentVersionResolver": "disk",
       "conventionalCommits": true
     },
-    "tagFormat": "v{version}",
+    "releaseTagPattern": "v{version}",
     "changelog": {
       "workspaceChangelog": {
         "renderOptions": {
