@@ -12,7 +12,7 @@ export class AuthService {
   readonly error = signal<string | null>(null);
 
   checkStatus(): void {
-    this.messaging.send<{ authenticated: boolean }>('GET_AUTH_STATUS').subscribe({
+    this.messaging.send<{ authenticated: boolean }>({ type: 'GET_AUTH_STATUS' }).subscribe({
       next: (res) => {
         this.isAuthenticated.set(res.data?.authenticated ?? false);
         if (res.data?.authenticated) {
@@ -25,7 +25,7 @@ export class AuthService {
   login(): void {
     this.isLoading.set(true);
     this.error.set(null);
-    this.messaging.send<{ authenticated: boolean }>('AUTHENTICATE').subscribe({
+    this.messaging.send<{ authenticated: boolean }>({ type: 'AUTHENTICATE' }).subscribe({
       next: (res) => {
         this.isLoading.set(false);
         if (res.success) {
@@ -43,7 +43,7 @@ export class AuthService {
   }
 
   logout(): void {
-    this.messaging.send('LOGOUT').subscribe({
+    this.messaging.send({ type: 'LOGOUT' }).subscribe({
       next: () => {
         this.isAuthenticated.set(false);
         this.router.navigate(['/auth']);

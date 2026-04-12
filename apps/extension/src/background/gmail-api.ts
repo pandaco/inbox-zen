@@ -166,7 +166,7 @@ async function fetchAllMetadataOptimized(
           messages.push(...results);
           errorCount += chunk.length - results.length;
           success = true;
-        } catch (err: any) {
+        } catch {
           retries++;
           if (retries < MAX_RETRIES) {
             const waitTime = Math.pow(2, retries) * 1000 + (Math.random() * 500);
@@ -185,7 +185,7 @@ async function fetchAllMetadataOptimized(
       const shouldSendPartial = isFirst || isLast || (elapsed > 3000) || (batchCount % 10 === 0);
       
       if (onProgress && shouldSendPartial) {
-        onProgress(messages.length, ids.length, true as any, messages, errorCount);
+        onProgress(messages.length, ids.length, true, messages, errorCount);
         lastPartialSentAt = Date.now();
       }
 
@@ -308,7 +308,7 @@ function processRepeatedSubjects(messages: MessageMetadata[], totalFetched: numb
     const s = getHeader(m, 'Subject') || '(no subject)';
     counts.set(s, (counts.get(s) || 0) + 1);
   }
-  const items = [...counts.entries()].filter(([_, c]) => c > 2).map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
+  const items = [...counts.entries()].filter(([ , c]) => c > 2).map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 

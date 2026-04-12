@@ -96,7 +96,7 @@ async function clearToken(): Promise<void> {
 }
 
 function isAuthError(err: unknown): boolean {
-  return (err as any)?.status === 401 || (err instanceof Error && err.message.includes('401'));
+  return (err as { status?: number })?.status === 401 || (err instanceof Error && err.message.includes('401'));
 }
 
 async function handle(message: BgMessage): Promise<BgResponse> {
@@ -124,7 +124,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
     case 'DELETE_EMAILS_BY_QUERY': {
       const token = await getStoredToken();
       if (!token) return { success: false, error: 'Not authenticated' };
-      const { query } = message as any;
+      const { query } = message as BgMessage & { query: string };
       if (!query) return { success: false, error: 'Missing query' };
       try {
         const data = await deleteEmailsByQuery(token, query);
@@ -141,7 +141,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
     case 'DELETE_MESSAGE': {
       const token = await getStoredToken();
       if (!token) return { success: false, error: 'Not authenticated' };
-      const { id } = message as any;
+      const { id } = message as BgMessage & { id: string };
       if (!id) return { success: false, error: 'Missing message ID' };
       try {
         const data = await deleteMessage(token, id);
@@ -191,7 +191,7 @@ chrome.runtime.onConnect.addListener((port) => {
         fetched, 
         total,
         data: partialData
-      } as any);
+      } as PortMessage<GlobalStats>);
     };
 
     getGlobalStats(token, onProgress)
