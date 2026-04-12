@@ -59,6 +59,11 @@
           "authors": false
         }
       }
+    },
+    "git": {
+      "commit": true,
+      "tag": true,
+      "push": false
     }
   }
 }
