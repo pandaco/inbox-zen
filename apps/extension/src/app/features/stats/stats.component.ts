@@ -32,6 +32,7 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     <div class="stats">
       <header class="stats__header">
         <h1 class="stats__title">
+          <img src="icons/icon48.png" alt="Inbox Zen" class="stats__logo" />
           Inbox Zen
           <span class="stats__version">v{{ version }}</span>
         </h1>
@@ -408,8 +409,15 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
       font-weight: 600; 
       color: #1a73e8;
       display: flex;
-      align-items: baseline;
-      gap: 0.5rem;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .stats__logo {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      display: block;
     }
 
     .stats__version {

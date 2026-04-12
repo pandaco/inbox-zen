@@ -7,13 +7,7 @@ import { AuthService } from '../../core/auth/auth.service';
   template: `
     <div class="auth">
       <div class="auth__logo" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"
-             fill="none" stroke="currentColor" stroke-width="1.5"
-             stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42
-                   M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-        </svg>
+        <img src="icons/icon128.png" alt="Inbox Zen" width="64" height="64" />
       </div>
 
       <h1 class="auth__title">Inbox Zen</h1>

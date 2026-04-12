@@ -21,7 +21,7 @@ const manifest = {
   name: 'Inbox Zen',
   version: pkg.version,
   ...(extensionKey && { key: extensionKey }),
-  description: 'An AI assistant for Gmail',
+  description: 'Identify and clean up heavy, redundant, and unread emails to regain serenity in your Gmail inbox.',
   permissions: ['storage', 'identity'],
   host_permissions: [
     'https://mail.google.com/*',
@@ -49,9 +49,10 @@ const manifest = {
     },
   }),
   icons: {
-    16: 'favicon.ico',
-    48: 'favicon.ico',
-    128: 'favicon.ico',
+    16: 'icons/icon16.png',
+    32: 'icons/icon32.png',
+    48: 'icons/icon48.png',
+    128: 'icons/icon128.png',
   },
   web_accessible_resources: [
     {
