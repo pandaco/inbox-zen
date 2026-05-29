@@ -4,9 +4,9 @@ export type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats };
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const BATCH_API = 'https://www.googleapis.com/batch/gmail/v1';
-const BATCH_SIZE = 50;       // Max recommended batch size
-const BATCH_DELAY_MS = 1100; // Optimal delay to stay under 250 units/s (50 * 5 = 250)
-const MAX_RETRIES = 5;
+const BATCH_SIZE = 40;       // Reduced batch size for better stability
+const BATCH_DELAY_MS = 2000; // Increased delay (1 batch every 2s per worker)
+const MAX_RETRIES = 10;      // More retries for large mailboxes
 
 async function fetchJson<T>(url: string, token: string): Promise<T> {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -76,14 +76,48 @@ function parseBatchResponse(text: string, contentType: string): MessageMetadata[
     .split(`--${boundary}`)
     .slice(1, -1)
     .flatMap(part => {
+      // Robust detection of all quota-related errors in the sub-response headers
+      const isRateLimited = 
+        part.includes('HTTP/1.1 429') || 
+        part.includes('HTTP/1.1 503') || 
+        (part.includes('HTTP/1.1 403') && (
+          part.includes('rateLimitExceeded') || 
+          part.includes('userRateLimitExceeded') || 
+          part.includes('quota')
+        ));
+
+      if (isRateLimited) {
+        throw new Error('Rate limited'); // Triggers retry in processWorker
+      }
+      
       const jsonStart = part.indexOf('{');
       const jsonEnd = part.lastIndexOf('}');
       if (jsonStart === -1 || jsonEnd === -1) return [];
+
       try {
-        const parsed = JSON.parse(part.slice(jsonStart, jsonEnd + 1)) as MessageMetadata;
+        const parsed = JSON.parse(part.slice(jsonStart, jsonEnd + 1)) as MessageMetadata & {
+          error?: { code?: number; message?: string };
+        };
+        
+        if (parsed.error) {
+          const code = parsed.error.code;
+          const msg = (parsed.error.message || '').toLowerCase();
+          const isRetryable = 
+            code === 429 || 
+            code === 503 || 
+            (code === 403 && (msg.includes('rate') || msg.includes('quota') || msg.includes('limit')));
+
+          if (isRetryable) throw new Error('Rate limited');
+          
+          // Non-retryable error (like 404 Message Not Found), we return empty to skip it
+          return [];
+        }
+
         if (!parsed.id) return [];
         return [parsed];
-      } catch {
+      } catch (err) {
+        // Re-throw if it's the specific "Rate limited" signal
+        if (err instanceof Error && err.message === 'Rate limited') throw err;
         return [];
       }
     });
