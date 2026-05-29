@@ -1,3 +1,9 @@
+## 0.2.2 (2026-04-12)
+
+### 🚀 Features
+
+- **branding:** integrate new logo and update extension description
+
 ## 0.2.1 (2026-04-12)
 
 This was a version bump only, there were no code changes.
