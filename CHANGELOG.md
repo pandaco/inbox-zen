@@ -1,3 +1,16 @@
+## 0.2.3 (2026-07-06)
+
+### 🚀 Features
+
+- add GitHub Actions release workflow ([307731b](https://github.com/pandaco/inbox-zen/commit/307731b))
+
+### 🩹 Fixes
+
+- patch npm audit vulnerabilities in build toolchain and angular runtime ([c144b4d](https://github.com/pandaco/inbox-zen/commit/c144b4d))
+- upgrade nx to v23 and angular to v22, clearing remaining audit vulns ([37796a0](https://github.com/pandaco/inbox-zen/commit/37796a0))
+- correct CI Node version pin and add lint/test steps ([dc6ad64](https://github.com/pandaco/inbox-zen/commit/dc6ad64))
+- stop mislabeling the build artifact zip as .crx ([9567d62](https://github.com/pandaco/inbox-zen/commit/9567d62))
+
 ## 0.2.2 (2026-04-12)
 
 ### 🚀 Features
