@@ -32,12 +32,14 @@
     }
   },
   "release": {
-    "projects": ["inbox-zen", "extension"],
+    "projects": [
+      "inbox-zen",
+      "extension"
+    ],
     "version": {
       "fallbackCurrentVersionResolver": "disk",
       "conventionalCommits": true
     },
-    "releaseTagPattern": "v{version}",
     "changelog": {
       "workspaceChangelog": {
         "renderOptions": {
@@ -54,6 +56,9 @@
       "commit": true,
       "tag": true,
       "push": false
+    },
+    "releaseTag": {
+      "pattern": "v{version}"
     }
   }
 }
