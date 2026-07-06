@@ -1,3 +1,10 @@
+## 0.2.3 (2026-07-06)
+
+### 🩹 Fixes
+
+- upgrade nx to v23 and angular to v22, clearing remaining audit vulns ([37796a0](https://github.com/pandaco/inbox-zen/commit/37796a0))
+- patch npm audit vulnerabilities in build toolchain and angular runtime ([c144b4d](https://github.com/pandaco/inbox-zen/commit/c144b4d))
+
 ## 0.2.2 (2026-04-12)
 
 ### 🚀 Features
