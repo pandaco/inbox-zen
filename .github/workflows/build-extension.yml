@@ -33,15 +33,13 @@ jobs:
       - name: Build extension
         run: npx nx build extension
 
-      - name: Package extension (ZIP to CRX)
+      - name: Package extension
         run: |
           cd apps/extension/dist
           zip -r ../../../inbox-zen-extension.zip .
-          cd ../../../
-          mv inbox-zen-extension.zip inbox-zen-extension.crx
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: inbox-zen-extension
-          path: inbox-zen-extension.crx
+          path: inbox-zen-extension.zip
