@@ -39,7 +39,7 @@ jobs:
           zip -r ../../../inbox-zen-extension.zip .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: inbox-zen-extension
           path: inbox-zen-extension.zip
