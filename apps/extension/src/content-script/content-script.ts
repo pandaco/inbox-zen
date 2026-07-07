@@ -1,17 +1,109 @@
 const BUTTON_ID = 'inbox-zen-btn';
 const PANEL_ID = 'inbox-zen-panel';
+const STYLE_ID = 'inbox-zen-styles';
 const STORAGE_KEY = 'inbox-zen-dimensions';
 const DEFAULT_WIDTH = 420;
 const DEFAULT_HEIGHT = 580;
+const MAX_WIDTH_RATIO = 0.9; // of viewport width
+const MAX_HEIGHT_RATIO = 0.8; // of viewport height
 
 // Set when the panel is created; used to authenticate incoming postMessages.
 let panelIframe: HTMLIFrameElement | null = null;
 
+/**
+ * All theming lives in an injected stylesheet so the widget can follow the
+ * OS light/dark preference. Only behavioral styles (visibility, size) are
+ * set inline.
+ */
+function injectStyles(): void {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+    #${BUTTON_ID} {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 99998;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: none;
+      background: #1a73e8;
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      transition: background 0.15s, transform 0.15s;
+    }
+    #${BUTTON_ID}:hover {
+      background: #1557b0;
+      transform: scale(1.05);
+    }
+    #${PANEL_ID} {
+      position: fixed;
+      bottom: 84px;
+      right: 24px;
+      min-width: 300px;
+      min-height: 400px;
+      max-width: ${MAX_WIDTH_RATIO * 100}vw;
+      max-height: ${MAX_HEIGHT_RATIO * 100}vh;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+      z-index: 99999;
+      overflow: hidden;
+      border: 1px solid #e0e0e0;
+      background: #fff;
+    }
+    #${PANEL_ID} .inbox-zen-resize {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 24px;
+      height: 24px;
+      cursor: nwse-resize;
+      z-index: 100000;
+      background: linear-gradient(135deg, #1a73e8 35%, transparent 35%);
+      border-radius: 12px 0 0 0;
+      opacity: 0.4;
+      transition: opacity 0.2s;
+    }
+    #${PANEL_ID} .inbox-zen-resize:hover {
+      opacity: 0.8;
+    }
+    #${PANEL_ID} iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    @media (prefers-color-scheme: dark) {
+      #${BUTTON_ID} {
+        background: #8ab4f8;
+        color: #202124;
+      }
+      #${BUTTON_ID}:hover {
+        background: #aecbfa;
+      }
+      #${PANEL_ID} {
+        border-color: #3c4043;
+        background: #202124;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+      #${PANEL_ID} .inbox-zen-resize {
+        background: linear-gradient(135deg, #8ab4f8 35%, transparent 35%);
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function createButton(): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.id = BUTTON_ID;
-  btn.title = 'Gmail Assistant';
-  btn.setAttribute('aria-label', 'Open Gmail Assistant');
+  btn.title = chrome.i18n.getMessage('csOpenAssistant');
+  btn.setAttribute('aria-label', chrome.i18n.getMessage('csOpenAssistant'));
   btn.innerHTML = `
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
          fill="none" stroke="currentColor" stroke-width="2"
@@ -29,90 +121,40 @@ function createButton(): HTMLButtonElement {
     </svg>
   `;
 
-  Object.assign(btn.style, {
-    position: 'fixed',
-    bottom: '24px',
-    right: '24px',
-    zIndex: '99998',
-    width: '48px',
-    height: '48px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#1a73e8',
-    color: '#fff',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-    transition: 'background 0.15s, transform 0.15s',
-  });
-
-  btn.addEventListener('mouseover', () => {
-    btn.style.background = '#1557b0';
-    btn.style.transform = 'scale(1.05)';
-  });
-  btn.addEventListener('mouseout', () => {
-    btn.style.background = '#1a73e8';
-    btn.style.transform = 'scale(1)';
-  });
-
   btn.addEventListener('click', togglePanel);
   return btn;
+}
+
+function clampWidth(width: number): number {
+  return Math.min(width, Math.floor(window.innerWidth * MAX_WIDTH_RATIO));
+}
+
+function clampHeight(height: number): number {
+  return Math.min(height, Math.floor(window.innerHeight * MAX_HEIGHT_RATIO));
 }
 
 function createPanel(): HTMLDivElement {
   const wrapper = document.createElement('div');
   wrapper.id = PANEL_ID;
+  // Behavioral inline styles only — theming is in the injected stylesheet.
+  wrapper.style.width = DEFAULT_WIDTH + 'px';
+  wrapper.style.height = DEFAULT_HEIGHT + 'px';
+  wrapper.style.display = 'none';
 
-  // Initial styling (hidden by default)
-  Object.assign(wrapper.style, {
-    position: 'fixed',
-    bottom: '84px',
-    right: '24px',
-    width: DEFAULT_WIDTH + 'px',
-    height: DEFAULT_HEIGHT + 'px',
-    minWidth: '300px',
-    minHeight: '400px',
-    maxWidth: '90vw',
-    maxHeight: '80vh',
-    borderRadius: '12px',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-    zIndex: '99999',
-    overflow: 'hidden',
-    display: 'none',
-    border: '1px solid #e0e0e0',
-    background: '#fff',
-  });
-
-  // Load and apply stored dimensions
+  // Load and apply stored dimensions, clamped to the current viewport
+  // (they may have been saved on a larger monitor).
   chrome.storage.local.get(STORAGE_KEY, (data) => {
     const dims = data[STORAGE_KEY] as { width: number; height: number } | undefined;
     if (dims) {
-      wrapper.style.width = dims.width + 'px';
-      wrapper.style.height = dims.height + 'px';
+      wrapper.style.width = clampWidth(dims.width) + 'px';
+      wrapper.style.height = clampHeight(dims.height) + 'px';
     }
   });
 
-  // Add resize handle (top-left) - since anchored at bottom-right
+  // Resize handle (top-left) — the panel is anchored bottom-right
   const handle = document.createElement('div');
-  handle.title = 'Resize';
-  Object.assign(handle.style, {
-    position: 'absolute',
-    top: '0',
-    left: '0',
-    width: '24px',
-    height: '24px',
-    cursor: 'nwse-resize',
-    zIndex: '100000',
-    background: 'linear-gradient(135deg, #1a73e8 35%, transparent 35%)',
-    borderRadius: '12px 0 0 0',
-    opacity: '0.4',
-    transition: 'opacity 0.2s',
-  });
-
-  handle.addEventListener('mouseenter', () => handle.style.opacity = '0.8');
-  handle.addEventListener('mouseleave', () => handle.style.opacity = '0.4');
+  handle.className = 'inbox-zen-resize';
+  handle.title = chrome.i18n.getMessage('csResize');
 
   let isResizing = false;
   handle.addEventListener('mousedown', (e) => {
@@ -170,11 +212,6 @@ function createPanel(): HTMLDivElement {
   const iframe = document.createElement('iframe');
   iframe.src = chrome.runtime.getURL('index.html');
   iframe.setAttribute('title', 'Gmail Assistant');
-  Object.assign(iframe.style, {
-    width: '100%',
-    height: '100%',
-    border: 'none',
-  });
 
   wrapper.appendChild(iframe);
   panelIframe = iframe;
@@ -186,10 +223,22 @@ function togglePanel(): void {
   if (!panel) return;
   const isOpen = panel.style.display !== 'none';
   panel.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    // Move focus into the panel so keyboard users land in the app.
+    panelIframe?.contentWindow?.focus();
+  }
+}
+
+function closePanel(): void {
+  const panel = document.getElementById(PANEL_ID);
+  if (panel) {
+    (panel as HTMLDivElement).style.display = 'none';
+  }
 }
 
 function inject(): void {
   if (document.getElementById(BUTTON_ID)) return;
+  injectStyles();
   document.body.appendChild(createButton());
   document.body.appendChild(createPanel());
 }
@@ -207,10 +256,17 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 
   if (event.data?.type === 'CLOSE_PANEL') {
-    const panel = document.getElementById(PANEL_ID);
-    if (panel) {
-      panel.style.display = 'none';
-    }
+    closePanel();
+  }
+});
+
+// Escape closes the panel when Gmail itself has focus (the app handles the
+// case where focus is inside the iframe).
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const panel = document.getElementById(PANEL_ID) as HTMLDivElement | null;
+  if (panel && panel.style.display !== 'none') {
+    closePanel();
   }
 });
 

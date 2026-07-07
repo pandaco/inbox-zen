@@ -18,10 +18,11 @@ const extensionKey = process.env['EXTENSION_KEY'];
 
 const manifest = {
   manifest_version: 3,
-  name: 'Inbox Zen',
+  name: '__MSG_appName__',
   version: pkg.version,
   ...(extensionKey && { key: extensionKey }),
-  description: 'Identify and clean up heavy, redundant, and unread emails to regain serenity in your Gmail inbox.',
+  description: '__MSG_appDesc__',
+  default_locale: 'en',
   permissions: ['storage', 'identity'],
   host_permissions: [
     'https://mail.google.com/*',
@@ -38,7 +39,7 @@ const manifest = {
     },
   ],
   action: {
-    default_title: 'Inbox Zen',
+    default_title: '__MSG_appName__',
   },
   ...(clientId && {
     oauth2: {

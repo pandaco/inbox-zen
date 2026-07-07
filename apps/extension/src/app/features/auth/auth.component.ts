@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { AuthService } from '../../core/auth/auth.service';
+import { TranslatePipe } from '../../core/i18n/i18n';
 
 @Component({
   selector: 'app-auth',
+  imports: [TranslatePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="auth">
@@ -11,7 +13,7 @@ import { AuthService } from '../../core/auth/auth.service';
       </div>
 
       <h1 class="auth__title">Inbox Zen</h1>
-      <p class="auth__subtitle">Connect your Gmail account to get started</p>
+      <p class="auth__subtitle">{{ 'authSubtitle' | t }}</p>
 
       @if (auth.error()) {
         <p class="auth__error" role="alert">{{ auth.error() }}</p>
@@ -25,7 +27,7 @@ import { AuthService } from '../../core/auth/auth.service';
       >
         @if (auth.isLoading()) {
           <span class="auth__spinner" aria-hidden="true"></span>
-          Connecting…
+          {{ 'authConnecting' | t }}
         } @else {
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
                aria-hidden="true">
@@ -38,7 +40,7 @@ import { AuthService } from '../../core/auth/auth.service';
             <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09
               14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
           </svg>
-          Connect with Google
+          {{ 'authConnectGoogle' | t }}
         }
       </button>
     </div>
@@ -55,19 +57,19 @@ import { AuthService } from '../../core/auth/auth.service';
       font-family: 'Google Sans', Roboto, sans-serif;
     }
 
-    .auth__logo { color: #1a73e8; }
+    .auth__logo { color: var(--accent); }
 
     .auth__title {
       margin: 0;
       font-size: 1.4rem;
       font-weight: 600;
-      color: #202124;
+      color: var(--text);
     }
 
     .auth__subtitle {
       margin: 0;
       font-size: 0.9rem;
-      color: #5f6368;
+      color: var(--text-dim);
       text-align: center;
     }
 
@@ -75,8 +77,8 @@ import { AuthService } from '../../core/auth/auth.service';
       margin: 0;
       padding: 0.6rem 1rem;
       border-radius: 6px;
-      background: #fce8e6;
-      color: #c5221f;
+      background: var(--danger-bg);
+      color: var(--danger);
       font-size: 0.85rem;
       text-align: center;
     }
@@ -87,10 +89,10 @@ import { AuthService } from '../../core/auth/auth.service';
       gap: 0.6rem;
       margin-top: 0.5rem;
       padding: 0.6rem 1.4rem;
-      border: 1px solid #dadce0;
+      border: 1px solid var(--border-input);
       border-radius: 4px;
-      background: #fff;
-      color: #3c4043;
+      background: var(--bg);
+      color: var(--text);
       font-size: 0.95rem;
       font-weight: 500;
       cursor: pointer;
@@ -98,19 +100,17 @@ import { AuthService } from '../../core/auth/auth.service';
       font-family: inherit;
     }
 
-    .auth__btn:hover:not(:disabled) { background: #f8f9fa; }
+    .auth__btn:hover:not(:disabled) { background: var(--surface); }
     .auth__btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
     .auth__spinner {
       width: 16px;
       height: 16px;
-      border: 2px solid #dadce0;
-      border-top-color: #1a73e8;
+      border: 2px solid var(--border-input);
+      border-top-color: var(--accent);
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
     }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
   `,
 })
 export class AuthComponent implements OnInit {

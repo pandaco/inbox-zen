@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, effect, inject, signal, computed, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
-import { StatsService, SenderStat, SizeStat, GlobalStats, QuickFilter } from './stats.service';
+import { StatsService, SizeStat, GlobalStats } from './stats.service';
 import { GmailSearchService } from '../../core/gmail-search/gmail-search.service';
-import pkg from '../../../../package.json';
+import { TranslatePipe, t } from '../../core/i18n/i18n';
+import { StatListComponent, StatRow } from './components/stat-list.component';
+import { ChallengeTabComponent } from './components/challenge-tab.component';
+import { FiltersTabComponent } from './components/filters-tab.component';
 
 function formatSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -14,19 +16,25 @@ function formatSize(bytes: number): string {
 
 function formatTimeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return t('justNow');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('minutesAgo', minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return t('hoursAgo', hours);
+  return t('daysAgo', Math.floor(hours / 24));
 }
 
 type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 'invites' | 'redundant' | 'challenge';
 
+interface TabDef {
+  id: Tab;
+  labelKey: string;
+  hintKey?: string;
+}
+
 @Component({
   selector: 'app-stats',
-  imports: [ReactiveFormsModule],
+  imports: [TranslatePipe, StatListComponent, ChallengeTabComponent, FiltersTabComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stats">
@@ -37,7 +45,8 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           <span class="stats__version">v{{ version }}</span>
         </h1>
         <div class="stats__actions">
-          <button class="stats__action-btn" (click)="openInNewTab()" aria-label="Open in new tab" title="Open in new tab">
+          <button class="stats__action-btn" (click)="openInNewTab()"
+                  [attr.aria-label]="'openInNewTab' | t" [title]="'openInNewTab' | t">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                  fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -45,7 +54,8 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
               <line x1="10" y1="14" x2="21" y2="3"></line>
             </svg>
           </button>
-          <button class="stats__action-btn" (click)="auth.logout()" aria-label="Sign out" title="Sign out">
+          <button class="stats__action-btn" (click)="auth.logout()"
+                  [attr.aria-label]="'signOut' | t" [title]="'signOut' | t">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                  fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -58,42 +68,17 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
 
       @if (!error()) {
         <nav class="stats__tabs" role="tablist">
-          <button role="tab" [attr.aria-selected]="activeTab() === 'unread'"
-            [class.active]="activeTab() === 'unread'" (click)="setTab('unread')">
-            Unread
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'repeated'"
-            [class.active]="activeTab() === 'repeated'" (click)="setTab('repeated')">
-            Repeated
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'heaviest'"
-            [class.active]="activeTab() === 'heaviest'" (click)="setTab('heaviest')">
-            Heaviest
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'parcels'"
-            [class.active]="activeTab() === 'parcels'" (click)="setTab('parcels')" title="Grouped delivery notifications ℹ️">
-            Parcels
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'old'"
-            [class.active]="activeTab() === 'old'" (click)="setTab('old')" title="Emails > 1 year in Inbox ℹ️">
-            Old
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'invites'"
-            [class.active]="activeTab() === 'invites'" (click)="setTab('invites')" title="Past calendar invites and .ics files ℹ️">
-            Invites
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'redundant'"
-            [class.active]="activeTab() === 'redundant'" (click)="setTab('redundant')" title="Long threads (> 3 messages) in your inbox ℹ️">
-            Redundant
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'filters'"
-            [class.active]="activeTab() === 'filters'" (click)="setTab('filters')" title="Quick searches to clean up your inbox ℹ️">
-            Filters
-          </button>
-          <button role="tab" [attr.aria-selected]="activeTab() === 'challenge'"
-            [class.active]="activeTab() === 'challenge'" (click)="setTab('challenge')" title="Zero-Inbox Challenge">
-            Challenge ⚡
-          </button>
+          @for (tab of tabs; track tab.id) {
+            <button role="tab"
+                    [id]="'tab-' + tab.id"
+                    [attr.aria-selected]="activeTab() === tab.id"
+                    [attr.aria-controls]="'tabpanel-' + tab.id"
+                    [class.active]="activeTab() === tab.id"
+                    (click)="setTab(tab.id)"
+                    [title]="tab.hintKey ? (tab.hintKey | t) : null">
+              {{ tab.labelKey | t }}
+            </button>
+          }
         </nav>
       }
 
@@ -102,11 +87,11 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
           <div class="stats__meta-row">
             <span class="stats__meta-text">
               @if (isLoading()) {
-                Analyzing... {{ loadFetched() }} / {{ loadTotal() }}
+                {{ 'analyzing' | t : loadFetched() : loadTotal() }}
               } @else {
-                {{ totalFetched() }} emails analysed
+                {{ 'emailsAnalysed' | t : totalFetched() }}
                 @if (errorCount() > 0) {
-                  · <strong>{{ errorCount() }} errors</strong>
+                  · <strong>{{ 'errorsCount' | t : errorCount() }}</strong>
                 }
               }
             </span>
@@ -115,272 +100,57 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
                 <div class="stats__load-bar" [style.width.%]="(loadFetched() / loadTotal()) * 100"></div>
               </div>
             }
-            <button class="stats__meta-close" (click)="showMeta.set(false)" aria-label="Close info bar">×</button>
+            <button class="stats__meta-close" (click)="showMeta.set(false)"
+                    [attr.aria-label]="'closeInfoBar' | t">×</button>
           </div>
         </div>
       }
 
-      <div class="stats__body" #body>
+      <div class="stats__body" #body
+           role="tabpanel"
+           [id]="'tabpanel-' + activeTab()"
+           [attr.aria-labelledby]="'tab-' + activeTab()">
         @if (isLoading() && totalFetched() === 0) {
-          <div class="stats__loading" role="status" aria-label="Loading">
+          <div class="stats__loading" role="status" [attr.aria-label]="'loading' | t">
             <span class="stats__spinner"></span>
-            <p class="stats__loading-text">Scanning Inbox (read & unread)…</p>
+            <p class="stats__loading-text">{{ 'scanningInbox' | t }}</p>
           </div>
         } @else {
           @if (error()) {
             <div class="stats__error" role="alert">
               <p>{{ error() }}</p>
-              <button class="stats__retry" (click)="load(true)">Retry</button>
+              <button class="stats__retry" (click)="load(true)">{{ 'retry' | t }}</button>
             </div>
-          } @else if (activeTab() === 'unread') {
-          @if (visibleSenders().length === 0) {
-            <p class="stats__empty">No unread emails found.</p>
+          } @else if (activeTab() === 'challenge') {
+            <app-challenge-tab [items]="oldestEmails()"
+                               (keep)="skipChallenge($event)"
+                               (trash)="trashChallenge($event)" />
+          } @else if (activeTab() === 'filters') {
+            <app-filters-tab (searchRequested)="searchFilter($event)" />
+          } @else if (activeRows().length === 0) {
+            <p class="stats__empty">{{ emptyKey() | t }}</p>
           } @else {
-            <ol class="chart" aria-label="Top senders by unread email count">
-              @for (item of visibleSenders(); track item.email; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchSender(item)"
-                    (keydown.enter)="searchSender(item)"
-                    (keydown.space)="searchSender(item)">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">
-                        {{ item.sender }}
-                        @if (item.email && item.email !== item.sender) {
-                          <span class="chart__email">&lt;{{ item.email }}&gt;</span>
-                        }
-                      </span>
-                      @if (item.unsubscribeUrl) {
-                        <button class="chart__unsub" (click)="$event.stopPropagation(); unsubscribe(item)"
-                                title="Unsubscribe from this list">
-                          Unsubscribe
-                        </button>
-                      }
-                      <span class="chart__value">{{ item.count }}</span>
-                    </div>
-                    <div class="chart__bar-bg">
-                      <div class="chart__bar"
-                        [style.width.%]="(item.count / sendersMax()) * 100"
-                        [attr.aria-label]="item.count + ' unread emails'">
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              }
-            </ol>
+            <app-stat-list [rows]="activeRows()"
+                           [listAria]="activeTab() === 'unread' ? ('topSendersAria' | t) : ''"
+                           (rowActivated)="onRowActivated($event)"
+                           (unsubscribeClicked)="unsubscribe($event)"
+                           (deleteConfirmed)="clearSender($event)" />
           }
-        } @else if (activeTab() === 'heaviest') {
-          @if (visibleHeaviest().length === 0) {
-            <p class="stats__empty">No heavy emails found.</p>
-          } @else {
-            <ol class="chart">
-              @for (item of visibleHeaviest(); track $index; let i = $index) {
-                <li class="chart__row chart__row--clickable" 
-                    role="button" tabindex="0"
-                    (click)="searchFilter('from:(' + item.from + ') subject:(&quot;' + item.subject + '&quot;)')">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                      <span class="chart__value">{{ formatSize(item.sizeEstimate) }}</span>
-                    </div>
-                    <div class="chart__from">{{ item.from }}</div>
-                  </div>
-                </li>
-              }
-            </ol>
+          @if (hasMore() && activeTab() !== 'filters' && activeTab() !== 'challenge') {
+            <div #sentinel class="stats__sentinel" aria-hidden="true"></div>
           }
-        } @else if (activeTab() === 'repeated') {
-          @if (visibleRepeated().length === 0) {
-            <p class="stats__empty">No repeated subjects found.</p>
-          } @else {
-            <ol class="chart">
-              @for (item of visibleRepeated(); track $index; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                      <span class="chart__value">{{ item.count }}</span>
-                    </div>
-                    <div class="chart__bar-bg">
-                      <div class="chart__bar" [style.width.%]="(item.count / repeatedMax()) * 100"></div>
-                    </div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
-        } @else if (activeTab() === 'parcels') {
-          @if (visibleParcels().length === 0) {
-            <p class="stats__empty">No parcel notifications found.</p>
-          } @else {
-            <ol class="chart">
-              @for (item of visibleParcels(); track $index; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchFilter(item.subject)">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                      <span class="chart__value">{{ item.count }}</span>
-                    </div>
-                    <div class="chart__bar-bg">
-                      <div class="chart__bar" [style.width.%]="(item.count / parcelsMax()) * 100"></div>
-                    </div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
-        } @else if (activeTab() === 'old') {
-          @if (visibleOld().length === 0) {
-            <p class="stats__empty">No old emails found.</p>
-          } @else {
-            <ol class="chart">
-              @for (item of visibleOld(); track $index; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                    </div>
-                    <div class="chart__from">Inbox message</div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
-        } @else if (activeTab() === 'invites') {
-          @if (visibleInvites().length === 0) {
-            <p class="stats__empty">No past invitations found.</p>
-          } @else {
-            <ol class="chart">
-              @for (item of visibleInvites(); track $index; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                    </div>
-                    <div class="chart__from">Calendar invite</div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
-        } @else if (activeTab() === 'redundant') {
-          @if (visibleRedundant().length === 0) {
-            <p class="stats__empty">No redundant threads found.</p>
-          } @else {
-            <ol class="chart">
-              @for (item of visibleRedundant(); track $index; let i = $index) {
-                <li class="chart__row chart__row--clickable"
-                    role="button" tabindex="0"
-                    (click)="searchFilter('subject:(&quot;' + item.subject + '&quot;)')">
-                  <span class="chart__rank">{{ i + 1 }}</span>
-                  <div class="chart__info">
-                    <div class="chart__label-row">
-                      <span class="chart__name">{{ item.subject }}</span>
-                      <span class="chart__value">{{ item.count }}</span>
-                    </div>
-                    <div class="chart__bar-bg">
-                      <div class="chart__bar" [style.width.%]="(item.count / redundantMax()) * 100"></div>
-                    </div>
-                  </div>
-                </li>
-              }
-            </ol>
-          }
-        } @else if (activeTab() === 'challenge') {
-          <div class="challenge">
-            @if (oldestEmails().length === 0) {
-              <div class="challenge__complete">
-                <span class="challenge__icon">🎉</span>
-                <h2>Inbox Zero!</h2>
-                <p>No more old messages to process.</p>
-              </div>
-            } @else {
-              <div class="challenge__card">
-                <div class="challenge__meta">Oldest Email ({{ oldestEmails().length }} left)</div>
-                <h2 class="challenge__subject">{{ challengeCurrent()?.subject }}</h2>
-                <div class="challenge__from">{{ challengeCurrent()?.from }}</div>
-                @if (challengeCurrent()?.snippet) {
-                  <div class="challenge__snippet">{{ challengeCurrent()?.snippet }}</div>
-                }
-                <div class="challenge__actions">
-                  <button class="challenge__btn challenge__btn--keep" (click)="skipChallenge(challengeCurrent()!)">Keep</button>
-                  <button class="challenge__btn challenge__btn--trash" (click)="trashChallenge(challengeCurrent()!)">Trash</button>
-                </div>
-              </div>
-            }
-          </div>
-        } @else if (activeTab() === 'filters') {
-          <div class="filters">
-            <ul class="filters__list">
-              @for (f of customFilters(); track f.id) {
-                <li class="filters__item">
-                  <button class="filters__btn" (click)="searchFilter(f.query)">{{ f.label }}</button>
-                  <button class="filters__icon-btn" (click)="startEditFilter(f)" title="Edit">✏️</button>
-                  <button class="filters__icon-btn filters__icon-btn--delete" (click)="deleteFilter(f.id)" title="Delete">🗑️</button>
-                </li>
-              }
-            </ul>
-
-            @if (!isAddingFilter() && !editingFilter()) {
-              <button class="filters__add-btn" (click)="startAddFilter()">+ Add a personalized filter</button>
-            }
-
-            @if (isAddingFilter() || editingFilter()) {
-              <form class="filters__form" [formGroup]="filterForm" (ngSubmit)="saveFilterForm()">
-                <h3 class="filters__form-title">{{ editingFilter() ? 'Edit Filter' : 'New Filter' }}</h3>
-                
-                <div class="filters__form-field">
-                  <label class="filters__form-label" for="filter-label">Name</label>
-                  <input type="text" id="filter-label" class="filters__form-input" 
-                         placeholder="e.g. My Newsletters" formControlName="label">
-                </div>
-
-                <div class="filters__form-field">
-                  <label class="filters__form-label" for="filter-query">Gmail Query</label>
-                  <input type="text" id="filter-query" class="filters__form-input" 
-                         placeholder="e.g. from:me to:me" formControlName="query">
-                </div>
-
-                <div class="filters__form-actions">
-                  <button type="button" class="filters__form-btn filters__form-btn--cancel" 
-                          (click)="cancelFilterForm()">Cancel</button>
-                  <button type="submit" class="filters__form-btn filters__form-btn--save" 
-                          [disabled]="filterForm.invalid">Save</button>
-                </div>
-              </form>
-            }
-          </div>
         }
-        @if (hasMore() && activeTab() !== 'filters' && activeTab() !== 'challenge') {
-          <div #sentinel class="stats__sentinel" aria-hidden="true"></div>
-        }
-      }
       </div>
 
       <footer class="stats__footer">
         @if (activeCachedAt()) {
           <span class="stats__sync-time"
                 [class.stats__sync-time--cached]="isFromCache()">
-            {{ isFromCache() ? 'Cached' : 'Synced' }} · {{ formatTimeAgo(activeCachedAt()!) }}
+            {{ (isFromCache() ? 'cached' : 'synced') | t }} · {{ formatTimeAgo(activeCachedAt()!) }}
           </span>
         }
         <button class="stats__refresh" (click)="load(true)" [disabled]="isLoading()">
-          Sync now
+          {{ 'syncNow' | t }}
         </button>
       </footer>
     </div>
@@ -390,8 +160,8 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
       display: flex;
       flex-direction: column;
       height: 100%;
-      background: #fff;
-      color: #202124;
+      background: var(--bg);
+      color: var(--text);
       font-family: 'Google Sans', Roboto, sans-serif;
     }
 
@@ -400,14 +170,14 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid #e0e0e0;
+      border-bottom: 1px solid var(--border);
     }
 
-    .stats__title { 
-      margin: 0; 
-      font-size: 1.1rem; 
-      font-weight: 600; 
-      color: #1a73e8;
+    .stats__title {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--accent);
       display: flex;
       align-items: center;
       gap: 0.6rem;
@@ -423,21 +193,21 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
     .stats__version {
       font-size: 0.65rem;
       font-weight: 400;
-      color: #9aa0a6;
+      color: var(--text-faint);
       font-family: monospace;
     }
 
     .stats__actions { display: flex; gap: 0.5rem; }
     .stats__action-btn {
       background: none; border: none; padding: 0.4rem; border-radius: 50%;
-      color: #5f6368; cursor: pointer; transition: background 0.2s;
+      color: var(--text-dim); cursor: pointer; transition: background 0.2s;
       display: flex; align-items: center; justify-content: center;
     }
-    .stats__action-btn:hover { background: #f1f3f4; color: #202124; }
+    .stats__action-btn:hover { background: var(--surface-hover); color: var(--text); }
 
     .stats__tabs {
       display: flex;
-      border-bottom: 1px solid #e0e0e0;
+      border-bottom: 1px solid var(--border);
       overflow-x: auto;
       scrollbar-width: none;
       -ms-overflow-style: none;
@@ -446,27 +216,27 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
 
     .stats__tabs button {
       flex: 0 0 auto; padding: 0.7rem 1rem; border: none; background: transparent;
-      font-size: 0.85rem; font-weight: 500; color: #5f6368; cursor: pointer;
+      font-size: 0.85rem; font-weight: 500; color: var(--text-dim); cursor: pointer;
       border-bottom: 2px solid transparent; font-family: inherit;
       white-space: nowrap;
     }
-    .stats__tabs button.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+    .stats__tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
 
     .stats__meta {
       padding: 0.6rem 1.2rem;
       font-size: 0.75rem;
-      color: #5f6368;
-      background: #f8f9fa;
-      border-bottom: 1px solid #e0e0e0;
+      color: var(--text-dim);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
     }
-    .stats__meta--error { color: #b06000; background: #fef7e0; }
+    .stats__meta--error { color: var(--warn); background: var(--warn-bg); }
     .stats__meta-row { display: flex; align-items: center; gap: 1rem; }
     .stats__meta-text { flex: 1; font-weight: 500; }
     .stats__meta-close {
-      background: none; border: none; font-size: 1.2rem; color: #5f6368;
+      background: none; border: none; font-size: 1.2rem; color: var(--text-dim);
       cursor: pointer; padding: 0 0.4rem; line-height: 1;
     }
-    .stats__meta-close:hover { color: #202124; }
+    .stats__meta-close:hover { color: var(--text); }
 
     .stats__body { flex: 1; overflow-y: auto; padding: 0.75rem 0; position: relative; }
 
@@ -474,195 +244,73 @@ type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 
       display: flex; flex-direction: column;
       align-items: center; gap: 0.75rem; padding: 3rem 1.5rem 2rem;
     }
-    .stats__loading-text { margin: 0; font-size: 0.82rem; color: #5f6368; }
+    .stats__loading-text { margin: 0; font-size: 0.82rem; color: var(--text-dim); }
     .stats__load-bar-bg {
       width: 100px; height: 4px;
-      background: #e0e0e0; border-radius: 2px; overflow: hidden;
+      background: var(--border); border-radius: 2px; overflow: hidden;
     }
     .stats__load-bar {
-      height: 100%; background: #1a73e8; border-radius: 2px;
+      height: 100%; background: var(--accent); border-radius: 2px;
       transition: width 0.3s ease;
     }
     .stats__load-bar-bg--mini { width: 60px; }
 
     .stats__spinner {
       width: 28px; height: 28px;
-      border: 3px solid #e0e0e0; border-top-color: #1a73e8;
+      border: 3px solid var(--border); border-top-color: var(--accent);
       border-radius: 50%; animation: spin 0.7s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
     .stats__error {
-      padding: 1.2rem; text-align: center; color: #c5221f; font-size: 0.85rem;
+      padding: 1.2rem; text-align: center; color: var(--danger); font-size: 0.85rem;
     }
     .stats__retry {
-      margin-top: 0.8rem; padding: 0.5rem 1rem; border: 1px solid #dadce0;
-      border-radius: 4px; background: #fff; color: #1a73e8; font-weight: 500;
+      margin-top: 0.8rem; padding: 0.5rem 1rem; border: 1px solid var(--border-input);
+      border-radius: 4px; background: var(--bg); color: var(--accent); font-weight: 500;
       cursor: pointer; font-family: inherit;
     }
-
-    .chart { list-style: none; padding: 0; margin: 0; }
-    .chart__row {
-      display: flex; align-items: center; padding: 0.6rem 1.2rem;
-      border-bottom: 1px solid #f1f3f4; gap: 0.8rem;
-    }
-    .chart__row--clickable { cursor: pointer; }
-    .chart__row--clickable:hover { background: #f8f9fa; }
-
-    .chart__rank { font-size: 0.75rem; color: #9aa0a6; min-width: 1.2rem; }
-    .chart__info { flex: 1; min-width: 0; }
-    .chart__label-row { display: flex; align-items: center; margin-bottom: 0.3rem; gap: 0.5rem; }
-    
-    .chart__name {
-      font-size: 0.82rem;
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      flex: 1;
-    }
-
-    .chart__email {
-      font-size: 0.75rem;
-      font-weight: 400;
-      color: #5f6368;
-      margin-left: 0.3rem;
-    }
-
-    .chart__value {
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: #1a73e8;
-      white-space: nowrap;
-    }
-
-    .chart__bar-bg { width: 100%; height: 4px; background: #f1f3f4; border-radius: 2px; }
-    .chart__bar { height: 100%; background: #1a73e8; border-radius: 2px; }
-
-    .chart__unsub {
-      font-size: 0.7rem; color: #1a73e8; background: #e8f0fe; border: none;
-      padding: 0.2rem 0.5rem; border-radius: 4px; cursor: pointer; font-weight: 500;
-    }
-    .chart__unsub:hover { background: #d2e3fc; }
-
-    .chart__from { font-size: 0.75rem; color: #5f6368; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    .stats__empty { padding: 3rem 1.5rem; text-align: center; color: #5f6368; font-size: 0.85rem; }
 
     .stats__sentinel { height: 1px; }
 
     .stats__footer {
-      padding: 0.5rem 1.2rem; border-top: 1px solid #e0e0e0;
+      padding: 0.5rem 1.2rem; border-top: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
-      background: #fff;
+      background: var(--bg);
     }
-    .stats__sync-time { font-size: 0.72rem; color: #5f6368; }
-    .stats__sync-time--cached { color: #1a73e8; font-weight: 500; }
+    .stats__sync-time { font-size: 0.72rem; color: var(--text-dim); }
+    .stats__sync-time--cached { color: var(--accent); font-weight: 500; }
     .stats__refresh {
-      background: none; border: 1px solid #dadce0; padding: 0.3rem 0.6rem;
-      border-radius: 4px; font-size: 0.75rem; font-weight: 500; color: #3c4043;
+      background: none; border: 1px solid var(--border-input); padding: 0.3rem 0.6rem;
+      border-radius: 4px; font-size: 0.75rem; font-weight: 500; color: var(--text-dim);
       cursor: pointer; font-family: inherit; transition: background 0.2s;
     }
-    .stats__refresh:hover:not(:disabled) { background: #f8f9fa; border-color: #1a73e8; color: #1a73e8; }
+    .stats__refresh:hover:not(:disabled) { background: var(--surface); border-color: var(--accent); color: var(--accent); }
     .stats__refresh:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    /* Filters Tab */
-    .filters { padding: 1rem 1.2rem; }
-    .filters__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-    .filters__item {
-      display: flex; gap: 0.5rem; align-items: stretch;
-    }
-    .filters__btn {
-      flex: 1; padding: 0.6rem 1rem; text-align: left;
-      background: #f8f9fa; border: 1px solid #dadce0; border-radius: 6px;
-      font-size: 0.85rem; color: #1a73e8; font-weight: 500; cursor: pointer;
-      font-family: inherit; transition: background 0.2s;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .filters__btn:hover { background: #f1f3f4; }
-    
-    .filters__icon-btn {
-      width: 36px; display: flex; align-items: center; justify-content: center;
-      background: #fff; border: 1px solid #dadce0; border-radius: 6px;
-      cursor: pointer; font-size: 0.9rem; transition: background 0.2s;
-    }
-    .filters__icon-btn:hover { background: #f1f3f4; }
-    .filters__icon-btn--delete:hover { background: #fce8e6; color: #c5221f; border-color: #f5c2c7; }
-
-    .filters__add-btn {
-      width: 100%; margin-top: 1rem; padding: 0.6rem;
-      background: #fff; border: 1px dashed #dadce0; border-radius: 6px;
-      color: #5f6368; font-size: 0.85rem; font-weight: 500; cursor: pointer;
-      font-family: inherit; transition: all 0.2s;
-    }
-    .filters__add-btn:hover { background: #f8f9fa; border-color: #1a73e8; color: #1a73e8; }
-
-    .filters__form {
-      margin-top: 1rem; padding: 1rem; background: #f8f9fa; border: 1px solid #dadce0; border-radius: 8px;
-      display: flex; flex-direction: column; gap: 0.8rem;
-    }
-    .filters__form-title { margin: 0; font-size: 0.9rem; font-weight: 600; color: #202124; }
-    .filters__form-field { display: flex; flex-direction: column; gap: 0.3rem; }
-    .filters__form-label { font-size: 0.75rem; font-weight: 600; color: #5f6368; }
-    .filters__form-input {
-      padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px;
-      font-size: 0.85rem; font-family: inherit;
-    }
-    .filters__form-input:focus { outline: none; border-color: #1a73e8; }
-    .filters__form-actions { display: flex; gap: 0.5rem; margin-top: 0.2rem; }
-    .filters__form-btn {
-      flex: 1; padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px;
-      font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit;
-    }
-    .filters__form-btn--save { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-    .filters__form-btn--save:hover:not(:disabled) { background: #1557b0; }
-    .filters__form-btn--save:disabled { opacity: 0.5; cursor: not-allowed; }
-    .filters__form-btn--cancel { background: #fff; color: #5f6368; }
-    .filters__form-btn--cancel:hover { background: #f1f3f4; }
-
-    /* Challenge Mode */
-    .challenge { padding: 2rem 1.2rem; display: flex; justify-content: center; }
-    .challenge__card {
-      width: 100%; max-width: 350px; background: #fff; border: 1px solid #e0e0e0;
-      border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-      display: flex; flex-direction: column; gap: 1rem;
-    }
-    .challenge__meta { font-size: 0.7rem; font-weight: 600; color: #1a73e8; text-transform: uppercase; letter-spacing: 0.5px; }
-    .challenge__subject { margin: 0; font-size: 1rem; font-weight: 600; color: #202124; line-height: 1.4; }
-    .challenge__from { font-size: 0.82rem; color: #5f6368; word-break: break-all; margin-bottom: 0.4rem; }
-    .challenge__snippet { 
-      font-size: 0.85rem; color: #5f6368; line-height: 1.5;
-      background: #f8f9fa; padding: 0.8rem; border-radius: 8px;
-      max-height: 120px; overflow-y: auto; font-style: italic;
-      border-left: 3px solid #1a73e8;
-    }
-    .challenge__actions { display: flex; gap: 1rem; margin-top: 0.5rem; }
-    .challenge__btn {
-      flex: 1; padding: 0.7rem; border: 1px solid #dadce0; border-radius: 8px;
-      font-size: 0.9rem; font-weight: 600; cursor: pointer; font-family: inherit;
-      transition: all 0.2s;
-    }
-    .challenge__btn--keep { background: #fff; color: #3c4043; }
-    .challenge__btn--keep:hover { background: #f1f3f4; }
-    .challenge__btn--trash { background: #fce8e6; color: #c5221f; border-color: #f5c2c7; }
-    .challenge__btn--trash:hover { background: #fad2cf; }
-
-    .challenge__complete { text-align: center; }
-    .challenge__icon { font-size: 3rem; margin-bottom: 1rem; display: block; }
   `,
 })
 export class StatsComponent implements OnInit, OnDestroy {
-  protected readonly version = pkg.version;
+  protected readonly version = chrome.runtime.getManifest().version;
   protected readonly auth = inject(AuthService);
   private readonly statsService = inject(StatsService);
   private readonly gmailSearch = inject(GmailSearchService);
   private readonly router = inject(Router);
-  private readonly fb = inject(FormBuilder);
 
   private readonly PAGE_SIZE = 10;
   private readonly body = viewChild.required<ElementRef<HTMLElement>>('body');
   private readonly sentinel = viewChild<ElementRef<HTMLElement>>('sentinel');
   private observer?: IntersectionObserver;
+
+  protected readonly tabs: TabDef[] = [
+    { id: 'unread', labelKey: 'tabUnread' },
+    { id: 'repeated', labelKey: 'tabRepeated' },
+    { id: 'heaviest', labelKey: 'tabHeaviest' },
+    { id: 'parcels', labelKey: 'tabParcels', hintKey: 'tabParcelsHint' },
+    { id: 'old', labelKey: 'tabOld', hintKey: 'tabOldHint' },
+    { id: 'invites', labelKey: 'tabInvites', hintKey: 'tabInvitesHint' },
+    { id: 'redundant', labelKey: 'tabRedundant', hintKey: 'tabRedundantHint' },
+    { id: 'filters', labelKey: 'tabFilters', hintKey: 'tabFiltersHint' },
+    { id: 'challenge', labelKey: 'tabChallenge', hintKey: 'tabChallengeHint' },
+  ];
 
   protected readonly activeTab = signal<Tab>('unread');
   protected readonly isLoading = signal(false);
@@ -677,98 +325,116 @@ export class StatsComponent implements OnInit, OnDestroy {
 
   protected readonly activeCachedAt = computed(() => this.globalCachedAt());
 
-  protected readonly senders = computed(() => {
+  private readonly senders = computed(() => {
     const items = this.stats()?.unreadSenders.items ?? [];
     return [...items].sort((a, b) => b.count - a.count);
   });
-  protected readonly heaviest = computed(() => this.stats()?.heaviestEmails.items ?? []);
-  protected readonly repeated = computed(() => this.stats()?.repeatedSubjects.items ?? []);
-  protected readonly parcels = computed(() => this.stats()?.parcelNotifications.items ?? []);
-  protected readonly oldEmails = computed(() => this.stats()?.oldEmails.items ?? []);
-  protected readonly pastInvites = computed(() => this.stats()?.pastInvites.items ?? []);
-  protected readonly redundantThreads = computed(() => this.stats()?.redundantThreads.items ?? []);
-  protected readonly oldestEmails = signal<SizeStat[]>([]); // Keep as signal for local updates in challenge
+  private readonly heaviest = computed(() => this.stats()?.heaviestEmails.items ?? []);
+  private readonly repeated = computed(() => this.stats()?.repeatedSubjects.items ?? []);
+  private readonly parcels = computed(() => this.stats()?.parcelNotifications.items ?? []);
+  private readonly oldEmails = computed(() => this.stats()?.oldEmails.items ?? []);
+  private readonly pastInvites = computed(() => this.stats()?.pastInvites.items ?? []);
+  private readonly redundantThreads = computed(() => this.stats()?.redundantThreads.items ?? []);
+  protected readonly oldestEmails = signal<SizeStat[]>([]); // local updates in challenge
 
-  protected readonly totalFetched = computed(() => {
-    const tab = this.activeTab();
+  private statsForTab(tab: Tab): { totalFetched: number; errorCount: number } | undefined {
     const s = this.stats();
-    if (!s) return 0;
-    if (tab === 'unread') return s.unreadSenders.totalFetched;
-    if (tab === 'repeated') return s.repeatedSubjects.totalFetched;
-    if (tab === 'parcels') return s.parcelNotifications.totalFetched;
-    if (tab === 'old') return s.oldEmails.totalFetched;
-    if (tab === 'invites') return s.pastInvites.totalFetched;
-    if (tab === 'redundant') return s.redundantThreads.totalFetched;
-    if (tab === 'challenge') return s.oldestEmails.totalFetched;
-    return s.heaviestEmails.totalFetched;
+    if (!s) return undefined;
+    switch (tab) {
+      case 'unread': return s.unreadSenders;
+      case 'repeated': return s.repeatedSubjects;
+      case 'parcels': return s.parcelNotifications;
+      case 'old': return s.oldEmails;
+      case 'invites': return s.pastInvites;
+      case 'redundant': return s.redundantThreads;
+      case 'challenge': return s.oldestEmails;
+      default: return s.heaviestEmails;
+    }
+  }
+
+  protected readonly totalFetched = computed(() => this.statsForTab(this.activeTab())?.totalFetched ?? 0);
+  protected readonly errorCount = computed(() => this.statsForTab(this.activeTab())?.errorCount ?? 0);
+
+  private readonly sendersMax = computed(() => Math.max(1, ...this.senders().map(s => s.count)));
+  private readonly repeatedMax = computed(() => Math.max(1, ...this.repeated().map(i => i.count)));
+  private readonly parcelsMax = computed(() => Math.max(1, ...this.parcels().map(i => i.count)));
+  private readonly redundantMax = computed(() => Math.max(1, ...this.redundantThreads().map(i => i.count)));
+
+  /** Row lists per tab, mapped to the generic StatRow shape for app-stat-list. */
+  private readonly rowsByTab = computed<Record<string, { rows: StatRow[]; total: number }>>(() => {
+    const slice = <T>(items: T[]): T[] => items.slice(0, this.displayCount());
+    const senderRows: StatRow[] = slice(this.senders()).map(item => ({
+      name: item.sender,
+      email: item.email,
+      value: String(item.count),
+      barPct: (item.count / this.sendersMax()) * 100,
+      unsubscribeUrl: item.unsubscribeUrl,
+      deletable: true,
+      ariaValue: t('unreadEmailsAria', item.count),
+    }));
+    const heaviestRows: StatRow[] = slice(this.heaviest()).map(item => ({
+      name: item.subject,
+      value: formatSize(item.sizeEstimate),
+      fromLine: item.from,
+    }));
+    const repeatedRows: StatRow[] = slice(this.repeated()).map(item => ({
+      name: item.subject,
+      value: String(item.count),
+      barPct: (item.count / this.repeatedMax()) * 100,
+    }));
+    const parcelRows: StatRow[] = slice(this.parcels()).map(item => ({
+      name: item.subject,
+      value: String(item.count),
+      barPct: (item.count / this.parcelsMax()) * 100,
+    }));
+    const oldRows: StatRow[] = slice(this.oldEmails()).map(item => ({
+      name: item.subject,
+      fromLine: t('inboxMessage'),
+    }));
+    const inviteRows: StatRow[] = slice(this.pastInvites()).map(item => ({
+      name: item.subject,
+      fromLine: t('calendarInvite'),
+    }));
+    const redundantRows: StatRow[] = slice(this.redundantThreads()).map(item => ({
+      name: item.subject,
+      value: String(item.count),
+      barPct: (item.count / this.redundantMax()) * 100,
+    }));
+    return {
+      unread: { rows: senderRows, total: this.senders().length },
+      heaviest: { rows: heaviestRows, total: this.heaviest().length },
+      repeated: { rows: repeatedRows, total: this.repeated().length },
+      parcels: { rows: parcelRows, total: this.parcels().length },
+      old: { rows: oldRows, total: this.oldEmails().length },
+      invites: { rows: inviteRows, total: this.pastInvites().length },
+      redundant: { rows: redundantRows, total: this.redundantThreads().length },
+    };
   });
 
-  protected readonly errorCount = computed(() => {
-    const tab = this.activeTab();
-    const s = this.stats();
-    if (!s) return 0;
-    if (tab === 'unread') return s.unreadSenders.errorCount;
-    if (tab === 'repeated') return s.repeatedSubjects.errorCount;
-    if (tab === 'parcels') return s.parcelNotifications.errorCount;
-    if (tab === 'old') return s.oldEmails.errorCount;
-    if (tab === 'invites') return s.pastInvites.errorCount;
-    if (tab === 'redundant') return s.redundantThreads.errorCount;
-    if (tab === 'challenge') return s.oldestEmails.errorCount;
-    return s.heaviestEmails.errorCount;
-  });
-
-  protected readonly visibleSenders = computed(() => this.senders().slice(0, this.displayCount()));
-  protected readonly heaviestVisible = computed(() => this.heaviest().slice(0, this.displayCount()));
-  protected readonly repeatedVisible = computed(() => this.repeated().slice(0, this.displayCount()));
-  protected readonly parcelsVisible = computed(() => this.parcels().slice(0, this.displayCount()));
-  protected readonly oldVisible = computed(() => this.oldEmails().slice(0, this.displayCount()));
-  protected readonly invitesVisible = computed(() => this.pastInvites().slice(0, this.displayCount()));
-  protected readonly redundantVisible = computed(() => this.redundantThreads().slice(0, this.displayCount()));
-
-  protected readonly visibleHeaviest = computed(() => this.heaviest().slice(0, this.displayCount()));
-  protected readonly visibleRepeated = computed(() => this.repeated().slice(0, this.displayCount()));
-  protected readonly visibleParcels = computed(() => this.parcels().slice(0, this.displayCount()));
-  protected readonly visibleOld = computed(() => this.oldEmails().slice(0, this.displayCount()));
-  protected readonly visibleInvites = computed(() => this.pastInvites().slice(0, this.displayCount()));
-  protected readonly visibleRedundant = computed(() => this.redundantThreads().slice(0, this.displayCount()));
-
-  protected readonly heaviestMax = computed(() => Math.max(1, ...this.heaviest().map(i => i.sizeEstimate)));
-  protected readonly repeatedMax = computed(() => Math.max(1, ...this.repeated().map(i => i.count)));
-  protected readonly parcelsMax = computed(() => Math.max(1, ...this.parcels().map(i => i.count)));
-  protected readonly oldMax = computed(() => Math.max(1, ...this.oldEmails().map(i => i.count)));
-  protected readonly redundantMax = computed(() => Math.max(1, ...this.redundantThreads().map(i => i.count)));
+  protected readonly activeRows = computed<StatRow[]>(
+    () => this.rowsByTab()[this.activeTab()]?.rows ?? [],
+  );
 
   protected readonly hasMore = computed(() => {
-    const tab = this.activeTab();
-    if (tab === 'filters' || tab === 'challenge') return false;
-    const current = this.displayCount();
-    const total = 
-      tab === 'unread' ? this.senders().length :
-      tab === 'heaviest' ? this.heaviest().length :
-      tab === 'repeated' ? this.repeated().length :
-      tab === 'parcels' ? this.parcels().length :
-      tab === 'old' ? this.oldEmails().length :
-      tab === 'invites' ? this.pastInvites().length :
-      tab === 'redundant' ? this.redundantThreads().length : 0;
-    return current < total;
+    const entry = this.rowsByTab()[this.activeTab()];
+    return entry ? this.displayCount() < entry.total : false;
   });
 
-  protected readonly sendersMax = computed(() =>
-    Math.max(1, ...this.senders().map((s) => s.count))
-  );
+  protected readonly emptyKey = computed(() => {
+    switch (this.activeTab()) {
+      case 'unread': return 'emptyUnread';
+      case 'repeated': return 'emptyRepeated';
+      case 'parcels': return 'emptyParcels';
+      case 'old': return 'emptyOld';
+      case 'invites': return 'emptyInvites';
+      case 'redundant': return 'emptyRedundant';
+      default: return 'emptyHeaviest';
+    }
+  });
 
   protected readonly challengeCurrent = computed(() =>
     this.oldestEmails().length > 0 ? this.oldestEmails()[0] : null
   );
-
-  protected readonly customFilters = signal<QuickFilter[]>([]);
-  protected readonly isAddingFilter = signal(false);
-  protected readonly editingFilter = signal<QuickFilter | null>(null);
-
-  protected readonly filterForm = this.fb.nonNullable.group({
-    label: ['', [Validators.required]],
-    query: ['', [Validators.required]]
-  });
 
   // true when data came from cache (not a live fetch just performed)
   protected readonly isFromCache = computed(() => {
@@ -796,34 +462,6 @@ export class StatsComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    chrome.storage.local.get('custom_filters', (data) => {
-      let filters = data['custom_filters'] as QuickFilter[] | undefined;
-      const otpFilter: QuickFilter = { 
-        id: '3', 
-        label: 'Security Codes (OTP)', 
-        query: 'subject:(code OR otp OR verification OR "mot de passe" OR sécurité OR security)' 
-      };
-
-      if (filters && Array.isArray(filters)) {
-        // Migration: Add OTP filter if missing
-        if (!filters.find(f => f.id === '3' || f.label.includes('OTP'))) {
-          filters = [...filters, otpFilter];
-          this.customFilters.set(filters);
-          this.saveFiltersToStorage();
-        } else {
-          this.customFilters.set(filters);
-        }
-      } else {
-        // Default filters for new users
-        const defaults: QuickFilter[] = [
-          { id: '1', label: 'Newsletters', query: 'newsletter' },
-          { id: '2', label: 'Unsubscribe links', query: 'unsubscribe OR "se désinscrire" OR "se désabonner"' },
-          otpFilter
-        ];
-        this.customFilters.set(defaults);
-        this.saveFiltersToStorage();
-      }
-    });
     this.load();
   }
 
@@ -836,97 +474,58 @@ export class StatsComponent implements OnInit, OnDestroy {
     this.displayCount.set(this.PAGE_SIZE);
   }
 
-  protected formatSize = formatSize;
   protected formatTimeAgo = formatTimeAgo;
 
-  protected searchSender(item: SenderStat): void {
-    this.gmailSearch.search(`from:${item.email} is:unread`);
+  protected onRowActivated(row: StatRow): void {
+    switch (this.activeTab()) {
+      case 'unread':
+        this.gmailSearch.search(`from:${row.email} is:unread`);
+        break;
+      case 'heaviest':
+        this.gmailSearch.search(`from:(${row.fromLine}) subject:("${row.name}")`);
+        break;
+      case 'parcels':
+        this.gmailSearch.search(row.name);
+        break;
+      default:
+        this.gmailSearch.search(`subject:("${row.name}")`);
+    }
   }
 
   protected searchFilter(query: string): void {
     this.gmailSearch.search(query);
   }
 
-  protected startAddFilter(): void {
-    this.isAddingFilter.set(true);
-    this.editingFilter.set(null);
-    this.filterForm.reset();
-  }
-
-  protected startEditFilter(filter: QuickFilter): void {
-    this.editingFilter.set(filter);
-    this.isAddingFilter.set(false);
-    this.filterForm.patchValue({
-      label: filter.label,
-      query: filter.query
-    });
-  }
-
-  protected cancelFilterForm(): void {
-    this.isAddingFilter.set(false);
-    this.editingFilter.set(null);
-    this.filterForm.reset();
-  }
-
-  protected saveFilterForm(): void {
-    if (this.filterForm.invalid) return;
-    
-    const { label, query } = this.filterForm.getRawValue();
-    const current = this.customFilters();
-    const edit = this.editingFilter();
-
-    if (edit) {
-      this.customFilters.set(
-        current.map(f => f.id === edit.id ? { ...f, label, query } : f)
-      );
-    } else {
-      const newFilter: QuickFilter = {
-        id: Math.random().toString(36).slice(2, 9),
-        label,
-        query
-      };
-      this.customFilters.set([...current, newFilter]);
-    }
-
-    this.saveFiltersToStorage();
-    this.cancelFilterForm();
-  }
-
-  protected deleteFilter(id: string): void {
-    if (confirm('Delete this filter?')) {
-      this.customFilters.update(filters => filters.filter(f => f.id !== id));
-      this.saveFiltersToStorage();
+  protected unsubscribe(row: StatRow): void {
+    if (!row.unsubscribeUrl) return;
+    // The URL comes from an email header — only allow http(s).
+    try {
+      const url = new URL(row.unsubscribeUrl);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+      window.open(url.href, '_blank');
+    } catch {
+      /* malformed URL — ignore */
     }
   }
 
-  private saveFiltersToStorage(): void {
-    chrome.storage.local.set({ 'custom_filters': this.customFilters() });
-  }
-
-  protected unsubscribe(item: SenderStat): void {
-    if (item.unsubscribeUrl) {
-      window.open(item.unsubscribeUrl, '_blank');
-    }
-  }
-
-  protected clearSender(item: SenderStat): void {
-    if (confirm(`Delete ALL unread emails from ${item.sender}?`)) {
-      this.isLoading.set(true);
-      this.statsService.deleteByQuery(`from:${item.email} is:unread`).subscribe({
-        next: (res) => {
-          if (res.success) {
-            this.load(true); // reload to update counts
-          } else {
-            this.isLoading.set(false);
-            this.error.set(res.error || 'Failed to delete');
-          }
-        },
-        error: () => {
+  /** Permanently deletes all unread emails from a sender (confirmed inline in the list). */
+  protected clearSender(row: StatRow): void {
+    if (!row.email) return;
+    this.isLoading.set(true);
+    this.statsService.deleteByQuery(`from:${row.email} is:unread`).subscribe({
+      next: (res) => {
+        if (res.success) {
+          this.load(true); // reload to update counts
+        } else {
           this.isLoading.set(false);
-          this.error.set('Unexpected error');
+          this.error.set(res.error || 'Failed to delete');
         }
-      });
-    }
+      },
+      error: () => {
+        this.isLoading.set(false);
+        this.error.set('Unexpected error');
+      }
+    });
   }
 
   protected skipChallenge(item: SizeStat): void {
@@ -992,7 +591,7 @@ export class StatsComponent implements OnInit, OnDestroy {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.runtime) {
       chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
       // Notify content script to close the side panel
-      window.parent.postMessage({ type: 'CLOSE_PANEL' }, '*');
+      window.parent.postMessage({ type: 'CLOSE_PANEL' }, 'https://mail.google.com');
     }
   }
 }

@@ -6,14 +6,24 @@ import { RouterOutlet } from '@angular/router';
   imports: [RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<router-outlet />`,
+  host: {
+    '(document:keydown.escape)': 'closePanel()',
+  },
   styles: `
     :host {
       display: block;
       height: 100vh;
       width: 100%;
-      background: white;
+      background: var(--bg);
       overflow-y: auto;
     }
   `,
 })
-export class App {}
+export class App {
+  /** Escape closes the Gmail side panel when the app runs inside its iframe. */
+  protected closePanel(): void {
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'CLOSE_PANEL' }, 'https://mail.google.com');
+    }
+  }
+}
