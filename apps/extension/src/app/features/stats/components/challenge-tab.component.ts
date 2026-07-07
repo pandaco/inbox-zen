@@ -6,6 +6,9 @@ import { TranslatePipe } from '../../../core/i18n/i18n';
   selector: 'app-challenge-tab',
   imports: [TranslatePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: {
+    '(document:keydown)': 'onKeydown($event)',
+  },
   template: `
     <div class="challenge">
       @if (items().length === 0) {
@@ -24,10 +27,10 @@ import { TranslatePipe } from '../../../core/i18n/i18n';
           }
           <div class="challenge__actions">
             <button class="challenge__btn challenge__btn--keep" (click)="keep.emit(current()!)">
-              {{ 'keep' | t }}
+              {{ 'keep' | t }} <kbd class="challenge__kbd">K</kbd>
             </button>
             <button class="challenge__btn challenge__btn--trash" (click)="trash.emit(current()!)">
-              {{ 'trash' | t }}
+              {{ 'trash' | t }} <kbd class="challenge__kbd">T</kbd>
             </button>
           </div>
         </div>
@@ -62,6 +65,11 @@ import { TranslatePipe } from '../../../core/i18n/i18n';
     .challenge__btn--trash:hover { background: var(--danger-bg-hover); }
     .challenge__complete { text-align: center; }
     .challenge__icon { font-size: 3rem; margin-bottom: 1rem; display: block; }
+    .challenge__kbd {
+      display: inline-block; margin-left: 0.3rem; padding: 0.05rem 0.35rem;
+      border: 1px solid var(--border-input); border-radius: 4px;
+      font-size: 0.7rem; font-family: inherit; opacity: 0.7;
+    }
   `,
 })
 export class ChallengeTabComponent {
@@ -70,4 +78,18 @@ export class ChallengeTabComponent {
   readonly trash = output<SizeStat>();
 
   protected readonly current = computed(() => (this.items().length > 0 ? this.items()[0] : null));
+
+  protected onKeydown(event: KeyboardEvent): void {
+    const item = this.current();
+    if (!item) return;
+    // Don't hijack typing in the Filters tab's form (or anywhere else with focus).
+    const target = event.target as HTMLElement | null;
+    if (target && /^(input|textarea|select)$/i.test(target.tagName)) return;
+
+    if (event.key === 'k' || event.key === 'K') {
+      this.keep.emit(item);
+    } else if (event.key === 't' || event.key === 'T' || event.key === 'd' || event.key === 'D') {
+      this.trash.emit(item);
+    }
+  }
 }
