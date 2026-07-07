@@ -44,7 +44,7 @@ const manifest = {
     oauth2: {
       client_id: clientId,
       scopes: [
-        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://mail.google.com/',
       ],
     },
   }),
@@ -56,7 +56,10 @@ const manifest = {
   },
   web_accessible_resources: [
     {
-      resources: ['*.html', '*.js', '*.css', '*.ico'],
+      // Only what the panel iframe needs — notably NOT background.js /
+      // content-script.js. Lazy routes keep hashed chunk-*.js names even
+      // with outputHashing: none, hence the glob.
+      resources: ['index.html', 'main.js', 'chunk-*.js', 'styles.css', 'favicon.ico', 'icons/*'],
       matches: ['https://mail.google.com/*'],
     },
   ],

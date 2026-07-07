@@ -9,8 +9,19 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_KEY = 'cache_global_stats';
 
 const SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://mail.google.com/',
 ].join(' ');
+
+// Tokens are kept in session storage: in-memory only, cleared when the
+// browser exits. Silent re-auth restores them transparently on next use.
+const tokenStore = chrome.storage.session;
+
+// Drop any token issued under a previous (narrower) scope so the next
+// getStoredToken() triggers a re-auth with the current scopes.
+chrome.runtime.onInstalled.addListener(() => {
+  void tokenStore.remove(TOKEN_KEY);
+  void chrome.storage.local.remove(TOKEN_KEY);
+});
 
 interface CacheEntry {
   result: GlobalStats;
@@ -66,9 +77,9 @@ async function authenticate(interactive = true): Promise<string> {
 }
 
 async function getStoredToken(): Promise<string | null> {
-  const result = await chrome.storage.local.get(TOKEN_KEY);
+  const result = await tokenStore.get(TOKEN_KEY);
   let token = (result[TOKEN_KEY] as string | undefined) ?? null;
-  
+
   if (!token) {
     try {
       // Try silent auth if no token stored
@@ -82,17 +93,24 @@ async function getStoredToken(): Promise<string | null> {
 }
 
 async function storeToken(token: string): Promise<void> {
-  await chrome.storage.local.set({ [TOKEN_KEY]: token });
+  await tokenStore.set({ [TOKEN_KEY]: token });
 }
 
 async function clearToken(): Promise<void> {
-  const token = await getStoredToken();
+  // Read the raw stored value — getStoredToken() would mint a fresh token
+  // via silent auth just to revoke it.
+  const result = await tokenStore.get(TOKEN_KEY);
+  const token = (result[TOKEN_KEY] as string | undefined) ?? null;
   if (token) {
-    await fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`).catch(() => {
+    await fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `token=${encodeURIComponent(token)}`,
+    }).catch(() => {
       /* ignore revoke errors */
     });
   }
-  await chrome.storage.local.remove(TOKEN_KEY);
+  await tokenStore.remove(TOKEN_KEY);
 }
 
 function isAuthError(err: unknown): boolean {
@@ -131,7 +149,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
         return { success: true, data };
       } catch (err) {
         if (isAuthError(err)) {
-          await chrome.storage.local.remove(TOKEN_KEY);
+          await tokenStore.remove(TOKEN_KEY);
           return { success: false, error: 'SESSION_EXPIRED' };
         }
         throw err;
@@ -148,7 +166,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
         return { success: data };
       } catch (err) {
         if (isAuthError(err)) {
-          await chrome.storage.local.remove(TOKEN_KEY);
+          await tokenStore.remove(TOKEN_KEY);
           return { success: false, error: 'SESSION_EXPIRED' };
         }
         throw err;
@@ -162,6 +180,7 @@ async function handle(message: BgMessage): Promise<BgResponse> {
 
 // Port-based streaming for stats (progress updates + cache)
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.sender?.id !== chrome.runtime.id) return;
   const [baseName, flag] = port.name.split(':') as [string, string | undefined];
   const forceRefresh = flag === 'refresh';
 
@@ -202,7 +221,7 @@ chrome.runtime.onConnect.addListener((port) => {
       })
       .catch(async (err: unknown) => {
         if (isAuthError(err)) {
-          await chrome.storage.local.remove(TOKEN_KEY);
+          await tokenStore.remove(TOKEN_KEY);
           send({ type: 'RESULT', success: false, error: 'SESSION_EXPIRED' });
         } else {
           const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -212,7 +231,8 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: BgMessage, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return false;
   handle(message)
     .then(sendResponse)
     .catch((err: unknown) => {

@@ -5,7 +5,7 @@ export class GmailSearchService {
   search(query: string): void {
     // If we are in an iframe (Gmail side panel)
     if (window.parent !== window) {
-      window.parent.postMessage({ type: 'GMAIL_SEARCH', query }, '*');
+      window.parent.postMessage({ type: 'GMAIL_SEARCH', query }, 'https://mail.google.com');
       return;
     }
 

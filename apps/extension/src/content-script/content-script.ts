@@ -4,6 +4,9 @@ const STORAGE_KEY = 'inbox-zen-dimensions';
 const DEFAULT_WIDTH = 420;
 const DEFAULT_HEIGHT = 580;
 
+// Set when the panel is created; used to authenticate incoming postMessages.
+let panelIframe: HTMLIFrameElement | null = null;
+
 function createButton(): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.id = BUTTON_ID;
@@ -128,16 +131,16 @@ function createPanel(): HTMLDivElement {
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       if (!isResizing) return;
-      
+
       // Resizing from top-left:
       // moving mouse left (deltaX negative) -> increases width
       // moving mouse up (deltaY negative) -> increases height
       const deltaX = moveEvent.clientX - startX;
       const deltaY = moveEvent.clientY - startY;
-      
+
       const newWidth = Math.max(300, startWidth - deltaX);
       const newHeight = Math.max(400, startHeight - deltaY);
-      
+
       wrapper.style.width = newWidth + 'px';
       wrapper.style.height = newHeight + 'px';
     };
@@ -147,7 +150,7 @@ function createPanel(): HTMLDivElement {
       wrapper.removeChild(overlay);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      
+
       // Persist dimensions
       chrome.storage.local.set({
         [STORAGE_KEY]: {
@@ -174,6 +177,7 @@ function createPanel(): HTMLDivElement {
   });
 
   wrapper.appendChild(iframe);
+  panelIframe = iframe;
   return wrapper;
 }
 
@@ -190,8 +194,13 @@ function inject(): void {
   document.body.appendChild(createPanel());
 }
 
-// Listen for search or UI requests from the iframe
+// Listen for search or UI requests from the iframe.
+// Only accept messages coming from our own panel iframe — anything else
+// (Gmail scripts, other frames) is ignored.
 window.addEventListener('message', (event: MessageEvent) => {
+  if (!panelIframe || event.source !== panelIframe.contentWindow) return;
+  if (event.origin !== `chrome-extension://${chrome.runtime.id}`) return;
+
   if (event.data?.type === 'GMAIL_SEARCH' && typeof event.data.query === 'string') {
     const encoded = encodeURIComponent(event.data.query as string).replace(/%20/g, '+');
     window.location.hash = `#search/${encoded}`;
