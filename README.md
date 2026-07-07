@@ -55,10 +55,21 @@ Direct access to powerful searches: "Newsletters", "Unsubscribe links", and many
 
 ## 📜 Useful Commands
 
-- `npm run start`: Launch the Angular development server.
-- `npm run build`: Compile the full extension.
+- `npm run build`: Compile the full extension into `apps/extension/dist`.
 - `npm run lint`: Check code quality.
 - `npm run test`: Run unit tests.
+
+### Development loop
+
+> ⚠️ `ng serve` is **not** usable for extension development: the app relies on
+> `chrome.runtime` / `chrome.storage` / `chrome.identity`, which don't exist at
+> `localhost:4200`.
+
+1. Create a `.env` at the repo root with your `GMAIL_CLIENT_ID` (see [SETUP.md](SETUP.md)).
+2. From `apps/extension`, run `npm run watch` — rebuilds the Angular UI **and** the
+   background/content-script bundles (with source maps) on every change.
+3. Load `apps/extension/dist` via **Load unpacked** at `chrome://extensions` (once).
+4. After each change: click **↻ Reload** on the extension card, then refresh Gmail.
 
 ---
 
