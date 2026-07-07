@@ -1,12 +1,26 @@
-import { getGlobalStats, deleteEmailsByQuery, deleteMessage } from './gmail-api';
-import type { BgMessage, BgResponse, PortMessage, GlobalStats } from '../shared/types';
+import { getGlobalStats, trashMessages, untrashMessages } from './gmail-api';
+import type { BgMessage, BgResponse, PortMessage, GlobalStats, TrashResult } from '../shared/types';
+import { deserializeCorpus, serializeCorpus, rebuildStats } from './corpus';
+import type { Corpus, CorpusEntry } from './corpus';
 
 export type { BgMessage, BgResponse };
 export type { MessageType } from '../shared/types';
 
 const TOKEN_KEY = 'gmail_access_token';
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — hard backstop, not the normal refresh path
 const CACHE_KEY = 'cache_global_stats';
+const CORPUS_KEY = 'cache_corpus';
+
+// Ids the user trashed in this SW lifetime — an in-flight or subsequent sync
+// filters these out so trashed rows don't resurrect before Gmail's indexes
+// catch up. Lost on SW restart (worst case: a row reappears for one sync).
+const recentlyTrashed = new Set<string>();
+
+// Corpus entries pruned by a trash action, keyed by message id, kept around
+// for the 10s Undo window. Lost on SW restart — undo then self-heals: the
+// untrashed message is back in the mailbox and gets refetched on the next
+// delta sync since it's no longer in the corpus.
+const pendingUndo = new Map<string, CorpusEntry>();
 
 const SCOPES = [
   'https://mail.google.com/',
@@ -35,8 +49,32 @@ async function getCached(): Promise<CacheEntry | null> {
   return entry;
 }
 
-async function setCached(result: GlobalStats): Promise<void> {
-  await chrome.storage.local.set({ [CACHE_KEY]: { result, cachedAt: Date.now() } });
+async function loadCorpus(): Promise<Corpus> {
+  try {
+    const r = await chrome.storage.local.get(CORPUS_KEY);
+    return deserializeCorpus(r[CORPUS_KEY]) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveCache(stats: GlobalStats, corpus: Corpus): Promise<void> {
+  const cachedAt = Date.now();
+  try {
+    await chrome.storage.local.set({
+      [CACHE_KEY]: { result: stats, cachedAt },
+      [CORPUS_KEY]: serializeCorpus(corpus, cachedAt),
+    });
+  } catch {
+    // Storage write failed (quota?) — degrade gracefully: keep the stats
+    // cache if possible, drop the corpus. Next sync's diff sees it missing
+    // and falls back to a full crawl.
+    try {
+      await chrome.storage.local.set({ [CACHE_KEY]: { result: stats, cachedAt } });
+    } catch {
+      /* give up silently — stats are still returned to the caller this run */
+    }
+  }
 }
 
 async function getManifestClientId(): Promise<string> {
@@ -49,7 +87,7 @@ async function getManifestClientId(): Promise<string> {
 async function authenticate(interactive = true): Promise<string> {
   const clientId = await getManifestClientId();
   const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
-  
+
   // We remove 'prompt=consent' to allow silent re-auth if already authorized
   const authUrl =
     `https://accounts.google.com/o/oauth2/v2/auth` +
@@ -117,6 +155,56 @@ function isAuthError(err: unknown): boolean {
   return (err as { status?: number })?.status === 401 || (err instanceof Error && err.message.includes('401'));
 }
 
+/**
+ * Prune trashed ids from the stored corpus and return an exact, freshly
+ * rebuilt GlobalStats — instant since it's just an in-memory recompute.
+ * Returns undefined when there's no corpus yet (e.g. before the first full
+ * sync), so the caller falls back to the client-side surgical row removal.
+ */
+async function pruneCorpusAndRebuild(ids: string[]): Promise<GlobalStats | undefined> {
+  const corpus = await loadCorpus();
+  if (Object.keys(corpus).length === 0) return undefined;
+
+  const pruned: Corpus = { ...corpus };
+  for (const id of ids) {
+    const entry = pruned[id];
+    if (entry) {
+      pendingUndo.set(id, entry);
+      delete pruned[id];
+    }
+  }
+
+  const cached = await getCached();
+  const stats = rebuildStats(
+    pruned,
+    Object.keys(pruned).length,
+    cached?.result.unreadSenders.errorCount ?? 0,
+  );
+  await saveCache(stats, pruned);
+  return stats;
+}
+
+/** Restore parked corpus entries for undone ids (self-heals if SW restarted). */
+async function restoreCorpusAndRebuild(ids: string[]): Promise<GlobalStats | undefined> {
+  const restored = ids.map(id => pendingUndo.get(id)).filter((e): e is CorpusEntry => !!e);
+  if (restored.length === 0) return undefined;
+
+  const corpus = await loadCorpus();
+  for (const entry of restored) {
+    corpus[entry.id] = entry;
+    pendingUndo.delete(entry.id);
+  }
+
+  const cached = await getCached();
+  const stats = rebuildStats(
+    corpus,
+    Object.keys(corpus).length,
+    cached?.result.unreadSenders.errorCount ?? 0,
+  );
+  await saveCache(stats, corpus);
+  return stats;
+}
+
 async function handle(message: BgMessage): Promise<BgResponse> {
   switch (message.type) {
     case 'GET_AUTH_STATUS': {
@@ -139,13 +227,16 @@ async function handle(message: BgMessage): Promise<BgResponse> {
       return { success: true };
     }
 
-    case 'DELETE_EMAILS_BY_QUERY': {
+    case 'TRASH_MESSAGES': {
       const token = await getStoredToken();
       if (!token) return { success: false, error: 'Not authenticated' };
-      const { query } = message as BgMessage & { query: string };
-      if (!query) return { success: false, error: 'Missing query' };
+      const { ids } = message as BgMessage & { ids: string[] };
+      if (!ids?.length) return { success: false, error: 'Missing message ids' };
       try {
-        const data = await deleteEmailsByQuery(token, query);
+        const result = await trashMessages(token, ids);
+        result.trashedIds.forEach(id => recentlyTrashed.add(id));
+        const stats = await pruneCorpusAndRebuild(result.trashedIds);
+        const data: TrashResult = { ...result, stats };
         return { success: true, data };
       } catch (err) {
         if (isAuthError(err)) {
@@ -156,14 +247,17 @@ async function handle(message: BgMessage): Promise<BgResponse> {
       }
     }
 
-    case 'DELETE_MESSAGE': {
+    case 'UNTRASH_MESSAGES': {
       const token = await getStoredToken();
       if (!token) return { success: false, error: 'Not authenticated' };
-      const { id } = message as BgMessage & { id: string };
-      if (!id) return { success: false, error: 'Missing message ID' };
+      const { ids } = message as BgMessage & { ids: string[] };
+      if (!ids?.length) return { success: false, error: 'Missing message ids' };
       try {
-        const data = await deleteMessage(token, id);
-        return { success: data };
+        const result = await untrashMessages(token, ids);
+        result.trashedIds.forEach(id => recentlyTrashed.delete(id));
+        const stats = await restoreCorpusAndRebuild(result.trashedIds);
+        const data: TrashResult = { ...result, stats };
+        return { success: true, data };
       } catch (err) {
         if (isAuthError(err)) {
           await tokenStore.remove(TOKEN_KEY);
@@ -178,13 +272,46 @@ async function handle(message: BgMessage): Promise<BgResponse> {
   }
 }
 
+// A sync in flight is shared across concurrent port connections — a second
+// "Sync now" click (or a second popup) joins the same crawl and its progress
+// stream instead of starting a redundant one.
+let inFlightSync: {
+  promise: ReturnType<typeof getGlobalStats>;
+  listeners: Set<(fetched: number, total: number, data?: GlobalStats) => void>;
+} | null = null;
+
+function runSync(
+  token: string,
+  corpus: Corpus,
+  onProgress: (fetched: number, total: number, data?: GlobalStats) => void,
+): ReturnType<typeof getGlobalStats> {
+  if (inFlightSync) {
+    inFlightSync.listeners.add(onProgress);
+    return inFlightSync.promise.finally(() => inFlightSync?.listeners.delete(onProgress));
+  }
+  const listeners = new Set([onProgress]);
+  const promise = getGlobalStats(token, {
+    corpus,
+    excludeIds: recentlyTrashed,
+    onProgress: (fetched, total, data) => listeners.forEach(l => l(fetched, total, data)),
+  }).finally(() => {
+    inFlightSync = null;
+  });
+  inFlightSync = { promise, listeners };
+  return promise;
+}
+
 // Port-based streaming for stats (progress updates + cache)
 chrome.runtime.onConnect.addListener((port) => {
   if (port.sender?.id !== chrome.runtime.id) return;
   const [baseName, flag] = port.name.split(':') as [string, string | undefined];
-  const forceRefresh = flag === 'refresh';
 
   if (baseName !== 'GET_GLOBAL_STATS') return;
+
+  // Plain: serve cache if present. ":refresh": delta sync against the
+  // stored corpus. ":full": forced full sync (empty corpus), the escape
+  // hatch offered when a sync has been producing errors.
+  const mode: 'cache' | 'delta' | 'full' = flag === 'full' ? 'full' : flag === 'refresh' ? 'delta' : 'cache';
 
   const send = (msg: PortMessage<GlobalStats>): void => {
     try { port.postMessage(msg); } catch { /* port disconnected */ }
@@ -196,28 +323,32 @@ chrome.runtime.onConnect.addListener((port) => {
       return;
     }
 
-    if (!forceRefresh) {
+    if (mode === 'cache') {
       const cached = await getCached();
       if (cached) {
         send({ type: 'RESULT', success: true, data: cached.result, cachedAt: cached.cachedAt });
         return;
       }
+      // No cache (first run, or expired past the 24h backstop) — fall
+      // through to a sync, delta against whatever corpus exists.
     }
 
+    const corpus = mode === 'full' ? {} : await loadCorpus();
+
     const onProgress = (fetched: number, total: number, partialData?: GlobalStats): void => {
-      send({ 
-        type: 'PROGRESS', 
-        fetched, 
+      send({
+        type: 'PROGRESS',
+        fetched,
         total,
-        data: partialData
+        data: partialData,
       } as PortMessage<GlobalStats>);
     };
 
-    getGlobalStats(token, onProgress)
-      .then(async data => {
+    runSync(token, corpus, onProgress)
+      .then(async ({ stats, corpus: newCorpus }) => {
         const cachedAt = Date.now();
-        await setCached(data);
-        send({ type: 'RESULT', success: true, data, cachedAt });
+        await saveCache(stats, newCorpus);
+        send({ type: 'RESULT', success: true, data: stats, cachedAt });
       })
       .catch(async (err: unknown) => {
         if (isAuthError(err)) {

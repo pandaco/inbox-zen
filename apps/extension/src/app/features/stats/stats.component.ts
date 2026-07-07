@@ -1,12 +1,15 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, OnInit, effect, inject, signal, computed, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { StatsService, SizeStat, GlobalStats } from './stats.service';
+import { StatsService, SizeStat, SubjectStat, SenderStat, GlobalStats } from './stats.service';
+import type { StatsResult } from '../../../shared/types';
 import { GmailSearchService } from '../../core/gmail-search/gmail-search.service';
 import { TranslatePipe, t } from '../../core/i18n/i18n';
 import { StatListComponent, StatRow } from './components/stat-list.component';
 import { ChallengeTabComponent } from './components/challenge-tab.component';
 import { FiltersTabComponent } from './components/filters-tab.component';
+import { UndoToastComponent } from './components/undo-toast.component';
+import { QuickCleanTabComponent, QuickCleanCategory } from './components/quick-clean-tab.component';
 
 function formatSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -24,7 +27,7 @@ function formatTimeAgo(timestamp: number): string {
   return t('daysAgo', Math.floor(hours / 24));
 }
 
-type Tab = 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'old' | 'invites' | 'redundant' | 'challenge';
+type Tab = 'quickclean' | 'unread' | 'heaviest' | 'repeated' | 'filters' | 'parcels' | 'redundant' | 'challenge';
 
 interface TabDef {
   id: Tab;
@@ -34,7 +37,7 @@ interface TabDef {
 
 @Component({
   selector: 'app-stats',
-  imports: [TranslatePipe, StatListComponent, ChallengeTabComponent, FiltersTabComponent],
+  imports: [TranslatePipe, StatListComponent, ChallengeTabComponent, FiltersTabComponent, UndoToastComponent, QuickCleanTabComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stats">
@@ -92,6 +95,7 @@ interface TabDef {
                 {{ 'emailsAnalysed' | t : totalFetched() }}
                 @if (errorCount() > 0) {
                   · <strong>{{ 'errorsCount' | t : errorCount() }}</strong>
+                  · <button class="stats__full-resync" (click)="load('full')">{{ 'fullResync' | t }}</button>
                 }
               }
             </span>
@@ -119,8 +123,11 @@ interface TabDef {
           @if (error()) {
             <div class="stats__error" role="alert">
               <p>{{ error() }}</p>
-              <button class="stats__retry" (click)="load(true)">{{ 'retry' | t }}</button>
+              <button class="stats__retry" (click)="load('refresh')">{{ 'retry' | t }}</button>
             </div>
+          } @else if (activeTab() === 'quickclean') {
+            <app-quick-clean-tab [categories]="quickCleanCategories()"
+                                 (trashCategory)="trashIds($event.ids)" />
           } @else if (activeTab() === 'challenge') {
             <app-challenge-tab [items]="oldestEmails()"
                                (keep)="skipChallenge($event)"
@@ -134,7 +141,7 @@ interface TabDef {
                            [listAria]="activeTab() === 'unread' ? ('topSendersAria' | t) : ''"
                            (rowActivated)="onRowActivated($event)"
                            (unsubscribeClicked)="unsubscribe($event)"
-                           (deleteConfirmed)="clearSender($event)" />
+                           (trashConfirmed)="trashRows($event)" />
           }
           @if (hasMore() && activeTab() !== 'filters' && activeTab() !== 'challenge') {
             <div #sentinel class="stats__sentinel" aria-hidden="true"></div>
@@ -149,10 +156,14 @@ interface TabDef {
             {{ (isFromCache() ? 'cached' : 'synced') | t }} · {{ formatTimeAgo(activeCachedAt()!) }}
           </span>
         }
-        <button class="stats__refresh" (click)="load(true)" [disabled]="isLoading()">
+        <button class="stats__refresh" (click)="load('refresh')" [disabled]="isLoading()">
           {{ 'syncNow' | t }}
         </button>
       </footer>
+
+      @if (toast(); as tst) {
+        <app-undo-toast [message]="tst.message" (undo)="undoTrash()" />
+      }
     </div>
   `,
   styles: `
@@ -237,6 +248,10 @@ interface TabDef {
       cursor: pointer; padding: 0 0.4rem; line-height: 1;
     }
     .stats__meta-close:hover { color: var(--text); }
+    .stats__full-resync {
+      background: none; border: none; padding: 0; font: inherit; font-weight: 600;
+      color: inherit; text-decoration: underline; cursor: pointer;
+    }
 
     .stats__body { flex: 1; overflow-y: auto; padding: 0.75rem 0; position: relative; }
 
@@ -289,6 +304,9 @@ interface TabDef {
   `,
 })
 export class StatsComponent implements OnInit, OnDestroy {
+  /** Cache older than this auto-triggers a background delta sync on open. */
+  private static readonly STALE_CACHE_MS = 60 * 60 * 1000;
+
   protected readonly version = chrome.runtime.getManifest().version;
   protected readonly auth = inject(AuthService);
   private readonly statsService = inject(StatsService);
@@ -301,18 +319,17 @@ export class StatsComponent implements OnInit, OnDestroy {
   private observer?: IntersectionObserver;
 
   protected readonly tabs: TabDef[] = [
+    { id: 'quickclean', labelKey: 'tabQuickClean', hintKey: 'tabQuickCleanHint' },
     { id: 'unread', labelKey: 'tabUnread' },
     { id: 'repeated', labelKey: 'tabRepeated' },
     { id: 'heaviest', labelKey: 'tabHeaviest' },
     { id: 'parcels', labelKey: 'tabParcels', hintKey: 'tabParcelsHint' },
-    { id: 'old', labelKey: 'tabOld', hintKey: 'tabOldHint' },
-    { id: 'invites', labelKey: 'tabInvites', hintKey: 'tabInvitesHint' },
     { id: 'redundant', labelKey: 'tabRedundant', hintKey: 'tabRedundantHint' },
     { id: 'filters', labelKey: 'tabFilters', hintKey: 'tabFiltersHint' },
     { id: 'challenge', labelKey: 'tabChallenge', hintKey: 'tabChallengeHint' },
   ];
 
-  protected readonly activeTab = signal<Tab>('unread');
+  protected readonly activeTab = signal<Tab>('quickclean');
   protected readonly isLoading = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly loadFetched = signal(0);
@@ -323,17 +340,23 @@ export class StatsComponent implements OnInit, OnDestroy {
   protected readonly globalCachedAt = signal<number | null>(null);
   protected readonly stats = signal<GlobalStats | null>(null);
 
+  // Undo-toast state: one toast at a time; a new trash replaces it.
+  protected readonly toast = signal<{ message: string; ids: string[] } | null>(null);
+  private toastTimer?: ReturnType<typeof setTimeout>;
+  private preTrashSnapshot: { stats: GlobalStats | null; oldest: SizeStat[] } | null = null;
+
   protected readonly activeCachedAt = computed(() => this.globalCachedAt());
 
   private readonly senders = computed(() => {
     const items = this.stats()?.unreadSenders.items ?? [];
-    return [...items].sort((a, b) => b.count - a.count);
+    // Noise score (frequency × recency × volume) surfaces senders worth
+    // acting on first, not just the highest raw count. Fall back to count
+    // for stats blobs cached before score was computed.
+    return [...items].sort((a, b) => (b.score ?? b.count) - (a.score ?? a.count));
   });
   private readonly heaviest = computed(() => this.stats()?.heaviestEmails.items ?? []);
   private readonly repeated = computed(() => this.stats()?.repeatedSubjects.items ?? []);
   private readonly parcels = computed(() => this.stats()?.parcelNotifications.items ?? []);
-  private readonly oldEmails = computed(() => this.stats()?.oldEmails.items ?? []);
-  private readonly pastInvites = computed(() => this.stats()?.pastInvites.items ?? []);
   private readonly redundantThreads = computed(() => this.stats()?.redundantThreads.items ?? []);
   protected readonly oldestEmails = signal<SizeStat[]>([]); // local updates in challenge
 
@@ -344,8 +367,6 @@ export class StatsComponent implements OnInit, OnDestroy {
       case 'unread': return s.unreadSenders;
       case 'repeated': return s.repeatedSubjects;
       case 'parcels': return s.parcelNotifications;
-      case 'old': return s.oldEmails;
-      case 'invites': return s.pastInvites;
       case 'redundant': return s.redundantThreads;
       case 'challenge': return s.oldestEmails;
       default: return s.heaviestEmails;
@@ -369,46 +390,66 @@ export class StatsComponent implements OnInit, OnDestroy {
       value: String(item.count),
       barPct: (item.count / this.sendersMax()) * 100,
       unsubscribeUrl: item.unsubscribeUrl,
-      deletable: true,
+      ids: item.ids,
       ariaValue: t('unreadEmailsAria', item.count),
     }));
     const heaviestRows: StatRow[] = slice(this.heaviest()).map(item => ({
       name: item.subject,
       value: formatSize(item.sizeEstimate),
       fromLine: item.from,
+      ids: item.id ? [item.id] : undefined,
     }));
     const repeatedRows: StatRow[] = slice(this.repeated()).map(item => ({
       name: item.subject,
       value: String(item.count),
       barPct: (item.count / this.repeatedMax()) * 100,
+      ids: item.ids,
     }));
     const parcelRows: StatRow[] = slice(this.parcels()).map(item => ({
       name: item.subject,
       value: String(item.count),
       barPct: (item.count / this.parcelsMax()) * 100,
-    }));
-    const oldRows: StatRow[] = slice(this.oldEmails()).map(item => ({
-      name: item.subject,
-      fromLine: t('inboxMessage'),
-    }));
-    const inviteRows: StatRow[] = slice(this.pastInvites()).map(item => ({
-      name: item.subject,
-      fromLine: t('calendarInvite'),
+      ids: item.ids,
     }));
     const redundantRows: StatRow[] = slice(this.redundantThreads()).map(item => ({
       name: item.subject,
       value: String(item.count),
       barPct: (item.count / this.redundantMax()) * 100,
+      ids: item.ids,
     }));
     return {
       unread: { rows: senderRows, total: this.senders().length },
       heaviest: { rows: heaviestRows, total: this.heaviest().length },
       repeated: { rows: repeatedRows, total: this.repeated().length },
       parcels: { rows: parcelRows, total: this.parcels().length },
-      old: { rows: oldRows, total: this.oldEmails().length },
-      invites: { rows: inviteRows, total: this.pastInvites().length },
       redundant: { rows: redundantRows, total: this.redundantThreads().length },
     };
+  });
+
+  /** Quick Clean categories — safe-to-delete groups with their message ids. */
+  protected readonly quickCleanCategories = computed<QuickCleanCategory[]>(() => {
+    const s = this.stats();
+    if (!s) return [];
+    const cat = (
+      id: string,
+      icon: string,
+      labelKey: string,
+      hintKey: string,
+      result: { items: { count: number; ids?: string[] }[] },
+    ): QuickCleanCategory => ({
+      id,
+      icon,
+      labelKey,
+      hintKey,
+      count: result.items.reduce((n, it) => n + it.count, 0),
+      ids: result.items.flatMap(it => it.ids ?? []),
+    });
+    return [
+      cat('otps', '🔑', 'qcExpiredOtps', 'qcExpiredOtpsHint', s.expiredOTPs),
+      cat('invites', '📅', 'qcPastInvites', 'qcPastInvitesHint', s.pastInvites),
+      cat('old', '🕰️', 'qcOldEmails', 'qcOldEmailsHint', s.oldEmails),
+      cat('parcels', '📦', 'qcParcels', 'qcParcelsHint', s.parcelNotifications),
+    ];
   });
 
   protected readonly activeRows = computed<StatRow[]>(
@@ -425,8 +466,6 @@ export class StatsComponent implements OnInit, OnDestroy {
       case 'unread': return 'emptyUnread';
       case 'repeated': return 'emptyRepeated';
       case 'parcels': return 'emptyParcels';
-      case 'old': return 'emptyOld';
-      case 'invites': return 'emptyInvites';
       case 'redundant': return 'emptyRedundant';
       default: return 'emptyHeaviest';
     }
@@ -467,6 +506,7 @@ export class StatsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.observer?.disconnect();
+    if (this.toastTimer) clearTimeout(this.toastTimer);
   }
 
   protected setTab(tab: Tab): void {
@@ -508,24 +548,8 @@ export class StatsComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Permanently deletes all unread emails from a sender (confirmed inline in the list). */
-  protected clearSender(row: StatRow): void {
-    if (!row.email) return;
-    this.isLoading.set(true);
-    this.statsService.deleteByQuery(`from:${row.email} is:unread`).subscribe({
-      next: (res) => {
-        if (res.success) {
-          this.load(true); // reload to update counts
-        } else {
-          this.isLoading.set(false);
-          this.error.set(res.error || 'Failed to delete');
-        }
-      },
-      error: () => {
-        this.isLoading.set(false);
-        this.error.set('Unexpected error');
-      }
-    });
+  protected trashRows(row: StatRow): void {
+    this.trashIds(row.ids ?? []);
   }
 
   protected skipChallenge(item: SizeStat): void {
@@ -533,27 +557,130 @@ export class StatsComponent implements OnInit, OnDestroy {
   }
 
   protected trashChallenge(item: SizeStat): void {
-    if (item.id) {
-      this.statsService.deleteMessage(item.id).subscribe(res => {
-        if (res.success) {
-          this.oldestEmails.update(list => list.filter(e => e.id !== item.id));
-        }
-      });
-    }
+    if (item.id) this.trashIds([item.id]);
   }
 
-  protected load(forceRefresh = false): void {
+  /**
+   * Move messages to trash with optimistic UI: snapshot the current state
+   * for undo, then either apply the exact stats the background returns
+   * (once a corpus exists) or fall back to pruning the trashed ids from
+   * every aggregate locally. Shows a 10s Undo toast either way. No full
+   * re-sync.
+   */
+  protected trashIds(ids: string[]): void {
+    if (ids.length === 0) return;
+    const snapshot = { stats: this.stats(), oldest: this.oldestEmails() };
+    this.statsService.trashMessages(ids).subscribe({
+      next: (res) => {
+        if (!res.success || !res.data) {
+          if (res.error === 'SESSION_EXPIRED') {
+            this.auth.logout();
+            this.router.navigate(['/auth']);
+            return;
+          }
+          this.error.set(res.error || 'Failed to move to trash');
+          return;
+        }
+        const { trashedIds, stats } = res.data;
+        if (trashedIds.length === 0) return;
+        this.preTrashSnapshot = snapshot;
+        const trashedSet = new Set(trashedIds);
+        if (stats) {
+          this.stats.set(stats);
+          this.oldestEmails.update(list => list.filter(e => !e.id || !trashedSet.has(e.id)));
+        } else {
+          this.pruneStats(trashedSet);
+        }
+        this.showToast(trashedIds);
+      },
+      error: () => this.error.set('Unexpected error'),
+    });
+  }
+
+  protected undoTrash(): void {
+    const current = this.toast();
+    this.clearToast();
+    if (!current) return;
+    this.statsService.untrashMessages(current.ids).subscribe({
+      next: (res) => {
+        if (res.success && this.preTrashSnapshot) {
+          this.stats.set(this.preTrashSnapshot.stats);
+          this.oldestEmails.set(this.preTrashSnapshot.oldest);
+          this.preTrashSnapshot = null;
+        }
+      },
+      error: () => this.error.set('Unexpected error'),
+    });
+  }
+
+  private showToast(trashedIds: string[]): void {
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toast.set({ message: t('movedToTrash', trashedIds.length), ids: trashedIds });
+    this.toastTimer = setTimeout(() => this.clearToast(), 10_000);
+  }
+
+  private clearToast(): void {
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = undefined;
+    }
+    this.toast.set(null);
+  }
+
+  /** Remove trashed ids from every aggregate in the local stats signal. */
+  private pruneStats(trashed: Set<string>): void {
+    const s = this.stats();
+    if (s) {
+      const pruneSubjects = (r: StatsResult<SubjectStat>): StatsResult<SubjectStat> => ({
+        ...r,
+        items: r.items
+          .map(it => (it.ids ? { ...it, ids: it.ids.filter(id => !trashed.has(id)) } : it))
+          .map(it => (it.ids ? { ...it, count: it.ids.length } : it))
+          .filter(it => !it.ids || it.ids.length > 0),
+      });
+      const pruneSenders = (r: StatsResult<SenderStat>): StatsResult<SenderStat> => ({
+        ...r,
+        items: r.items
+          .map(it => (it.ids ? { ...it, ids: it.ids.filter(id => !trashed.has(id)) } : it))
+          .map(it => (it.ids ? { ...it, count: it.ids.length } : it))
+          .filter(it => !it.ids || it.ids.length > 0),
+      });
+      const pruneSizes = (r: StatsResult<SizeStat>): StatsResult<SizeStat> => ({
+        ...r,
+        items: r.items.filter(it => !it.id || !trashed.has(it.id)),
+      });
+      this.stats.set({
+        unreadSenders: pruneSenders(s.unreadSenders),
+        heaviestEmails: pruneSizes(s.heaviestEmails),
+        repeatedSubjects: pruneSubjects(s.repeatedSubjects),
+        expiredOTPs: pruneSubjects(s.expiredOTPs),
+        parcelNotifications: pruneSubjects(s.parcelNotifications),
+        oldEmails: pruneSubjects(s.oldEmails),
+        pastInvites: pruneSubjects(s.pastInvites),
+        redundantThreads: pruneSubjects(s.redundantThreads),
+        oldestEmails: pruneSizes(s.oldestEmails),
+      });
+    }
+    this.oldestEmails.update(list => list.filter(e => !e.id || !trashed.has(e.id)));
+  }
+
+  /**
+   * Load stats. No args: serve cache if present (near-instant), else sync.
+   * 'refresh': delta sync against the cached corpus (seconds, not minutes).
+   * 'full': forced full re-sync (the error-state escape hatch).
+   */
+  protected load(mode?: 'refresh' | 'full'): void {
     this.isLoading.set(true);
     this.error.set(null);
     this.loadFetched.set(0);
     this.loadTotal.set(0);
     this.displayCount.set(this.PAGE_SIZE);
 
-    if (forceRefresh) {
+    if (mode) {
       this.globalCachedAt.set(null);
     }
 
-    this.statsService.streamGlobalStats(forceRefresh).subscribe({
+    this.statsService.streamGlobalStats(mode).subscribe({
       next: (msg) => {
         if (msg.type === 'PROGRESS') {
           this.loadFetched.set(msg.fetched);
@@ -577,6 +704,12 @@ export class StatsComponent implements OnInit, OnDestroy {
             this.stats.set(msg.data);
             this.oldestEmails.set(msg.data.oldestEmails.items);
             this.globalCachedAt.set(msg.cachedAt ?? Date.now());
+            // Cache was served plain and is stale — refresh silently
+            // (a fresh sync always stamps cachedAt = now, so this only
+            // fires for an actual cache hit, never right after a sync).
+            if (!mode && msg.cachedAt && Date.now() - msg.cachedAt > StatsComponent.STALE_CACHE_MS) {
+              this.load('refresh');
+            }
           }
         }
       },

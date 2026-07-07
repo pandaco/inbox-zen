@@ -10,7 +10,7 @@ import type { GlobalStats, SenderStat, SizeStat, SubjectStat, StatsResult } from
 
 function processUnreadSenders(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SenderStat> {
   const now = Date.now();
-  const senderCounts = new Map<string, { name: string; count: number; unsubscribeUrl?: string; firstDate: number; lastDate: number }>();
+  const senderCounts = new Map<string, { name: string; count: number; unsubscribeUrl?: string; firstDate: number; lastDate: number; ids: string[] }>();
   for (const m of messages) {
     const from = getHeader(m, 'From');
     if (!from) continue;
@@ -22,18 +22,19 @@ function processUnreadSenders(messages: MessageMetadata[], totalFetched: number,
     const existing = senderCounts.get(email);
     if (existing) {
       existing.count++;
+      existing.ids.push(m.id);
       if (!existing.unsubscribeUrl) existing.unsubscribeUrl = unsubUrl;
       existing.firstDate = Math.min(existing.firstDate, date);
       existing.lastDate = Math.max(existing.lastDate, date);
     } else {
-      senderCounts.set(email, { name, count: 1, unsubscribeUrl: unsubUrl, firstDate: date, lastDate: date });
+      senderCounts.set(email, { name, count: 1, unsubscribeUrl: unsubUrl, firstDate: date, lastDate: date, ids: [m.id] });
     }
   }
   const items = [...senderCounts.entries()]
     .map(([email, s]) => {
       const days = Math.max(1, (s.lastDate - s.firstDate) / 86400000);
       const score = (s.count / days) * ((now - s.lastDate) < 604800000 ? 2 : 1) * Math.log10(s.count + 1);
-      return { sender: s.name || email, email, count: s.count, unsubscribeUrl: s.unsubscribeUrl, score };
+      return { sender: s.name || email, email, count: s.count, unsubscribeUrl: s.unsubscribeUrl, score, ids: s.ids };
     })
     .sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
@@ -53,12 +54,13 @@ function processHeaviest(messages: MessageMetadata[], totalFetched: number, erro
 }
 
 function processRepeatedSubjects(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { count: number; ids: string[] }>();
   for (const m of messages) {
     const s = getHeader(m, 'Subject') || '(no subject)';
-    counts.set(s, (counts.get(s) || 0) + 1);
+    const agg = counts.get(s);
+    if (agg) { agg.count++; agg.ids.push(m.id); } else { counts.set(s, { count: 1, ids: [m.id] }); }
   }
-  const items = [...counts.entries()].filter(([, c]) => c > 2).map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
+  const items = [...counts.entries()].filter(([, agg]) => agg.count > 2).map(([subject, agg]) => ({ subject, count: agg.count, ids: agg.ids })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 
@@ -70,26 +72,27 @@ function processOTPs(messages: MessageMetadata[], totalFetched: number, errorCou
       const date = new Date(getHeader(m, 'Date')).getTime();
       return otpPatterns.some(p => p.test(s)) && (Date.now() - date > 86400000);
     })
-    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
+    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1, ids: [m.id] }));
   return { items, totalFetched, errorCount };
 }
 
 function processParcels(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
   const parcelPatterns = [/colis/i, /livraison/i, /delivery/i, /shipping/i, /expédition/i, /command/i, /order/i, /envoyé/i];
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { count: number; ids: string[] }>();
   for (const m of messages) {
     const s = getHeader(m, 'Subject') || '';
     if (parcelPatterns.some(p => p.test(s))) {
       const generic = s.replace(/\S*\d\S*/g, '#').replace(/#+/g, '#').replace(/\s+/g, ' ').trim();
-      counts.set(generic, (counts.get(generic) || 0) + 1);
+      const agg = counts.get(generic);
+      if (agg) { agg.count++; agg.ids.push(m.id); } else { counts.set(generic, { count: 1, ids: [m.id] }); }
     }
   }
-  const items = [...counts.entries()].map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
+  const items = [...counts.entries()].map(([subject, agg]) => ({ subject, count: agg.count, ids: agg.ids })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 
 function processOld(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const items = messages.map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
+  const items = messages.map(m => ({ subject: getHeader(m, 'Subject'), count: 1, ids: [m.id] }));
   return { items, totalFetched, errorCount };
 }
 
@@ -101,18 +104,18 @@ function processInvites(inviteMsgs: MessageMetadata[], allMessages: MessageMetad
       const date = new Date(getHeader(m, 'Date')).getTime();
       return (inviteRegex.test(s) || (inviteMsgs.some(im => im.id === m.id))) && (Date.now() - date > 86400000 * 7);
     })
-    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
+    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1, ids: [m.id] }));
   return { items, totalFetched, errorCount };
 }
 
 function processRedundant(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const threadCounts = new Map<string, { subject: string; count: number }>();
+  const threadCounts = new Map<string, { subject: string; count: number; ids: string[] }>();
   for (const m of messages) {
     const tid = m.threadId || m.id;
     const t = threadCounts.get(tid);
-    if (t) t.count++; else threadCounts.set(tid, { subject: getHeader(m, 'Subject'), count: 1 });
+    if (t) { t.count++; t.ids.push(m.id); } else { threadCounts.set(tid, { subject: getHeader(m, 'Subject'), count: 1, ids: [m.id] }); }
   }
-  const items = [...threadCounts.values()].filter(t => t.count > 3).map(t => ({ subject: t.subject, count: t.count })).sort((a, b) => b.count - a.count);
+  const items = [...threadCounts.values()].filter(t => t.count > 3).map(t => ({ subject: t.subject, count: t.count, ids: t.ids })).sort((a, b) => b.count - a.count);
   return { items, totalFetched, errorCount };
 }
 
@@ -266,5 +269,31 @@ describe('StatsAccumulator', () => {
     const acc = new StatsAccumulator(new Set(), new Set(), new Set(), new Set());
     acc.add([{ id: '', sizeEstimate: 1, payload: { headers: [] } }]);
     expect(acc.snapshot(0, 0).oldestEmails.items).toEqual([]);
+  });
+
+  it('collects the exact underlying message ids per aggregate', () => {
+    const { all, sets } = buildFixtures();
+    const acc = new StatsAccumulator(sets.unread, sets.heavy, sets.old, sets.invite);
+    acc.add(all);
+    const snapshot = acc.snapshot(all.length, 0);
+
+    // Newsletter sender aggregates exactly the 5 unread newsletter ids.
+    const newsSender = snapshot.unreadSenders.items.find(s => s.email === 'news@letter.com');
+    expect(newsSender?.ids?.slice().sort()).toEqual([...sets.unread].sort());
+
+    // Parcel group merges both colis fixtures under one generic subject.
+    expect(snapshot.parcelNotifications.items[0].ids).toHaveLength(2);
+
+    // Redundant thread carries all 4 thread message ids.
+    expect(snapshot.redundantThreads.items[0].ids).toHaveLength(4);
+
+    // Every OTP/old/invite item points at exactly one message.
+    for (const item of [
+      ...snapshot.expiredOTPs.items,
+      ...snapshot.oldEmails.items,
+      ...snapshot.pastInvites.items,
+    ]) {
+      expect(item.ids).toHaveLength(1);
+    }
   });
 });

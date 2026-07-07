@@ -8,9 +8,9 @@ export class ChromeMessagingService {
     return from(chrome.runtime.sendMessage<BgMessage, BgResponse<T>>(message));
   }
 
-  stream<T>(portName: string, forceRefresh = false): Observable<PortMessage<T>> {
+  stream<T>(portName: string, suffix?: 'refresh' | 'full'): Observable<PortMessage<T>> {
     return new Observable(observer => {
-      const name = forceRefresh ? `${portName}:refresh` : portName;
+      const name = suffix ? `${portName}:${suffix}` : portName;
       const port = chrome.runtime.connect({ name });
 
       port.onMessage.addListener((msg: PortMessage<T>) => {

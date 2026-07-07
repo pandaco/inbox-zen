@@ -14,8 +14,8 @@ export interface StatRow {
   fromLine?: string;
   /** Shows the Unsubscribe action. */
   unsubscribeUrl?: string;
-  /** Shows the (two-step) permanent-delete action. */
-  deletable?: boolean;
+  /** Underlying message ids — presence enables the (two-step) trash action. */
+  ids?: string[];
   ariaValue?: string;
 }
 
@@ -47,13 +47,13 @@ export interface StatRow {
                   {{ 'unsubscribe' | t }}
                 </button>
               }
-              @if (row.deletable) {
+              @if (row.ids?.length) {
                 <button class="chart__delete"
-                        (click)="$event.stopPropagation(); onDelete(i, row)"
-                        (blur)="pendingDelete.set(null)"
-                        [title]="'deleteSenderTitle' | t : row.name"
-                        [attr.aria-label]="'deleteSenderTitle' | t : row.name">
-                  {{ (pendingDelete() === i ? 'confirmAction' : 'delete') | t }}
+                        (click)="$event.stopPropagation(); onTrash(i, row)"
+                        (blur)="pendingTrash.set(null)"
+                        [title]="'trashRowTitle' | t : row.name"
+                        [attr.aria-label]="'trashRowTitle' | t : row.name">
+                  {{ (pendingTrash() === i ? 'confirmAction' : 'trash') | t }}
                 </button>
               }
               @if (row.value) {
@@ -83,17 +83,17 @@ export class StatListComponent {
 
   readonly rowActivated = output<StatRow>();
   readonly unsubscribeClicked = output<StatRow>();
-  readonly deleteConfirmed = output<StatRow>();
+  readonly trashConfirmed = output<StatRow>();
 
   // Two-step inline confirm: first click arms the row, second click fires.
-  protected readonly pendingDelete = signal<number | null>(null);
+  protected readonly pendingTrash = signal<number | null>(null);
 
-  protected onDelete(index: number, row: StatRow): void {
-    if (this.pendingDelete() === index) {
-      this.pendingDelete.set(null);
-      this.deleteConfirmed.emit(row);
+  protected onTrash(index: number, row: StatRow): void {
+    if (this.pendingTrash() === index) {
+      this.pendingTrash.set(null);
+      this.trashConfirmed.emit(row);
     } else {
-      this.pendingDelete.set(index);
+      this.pendingTrash.set(index);
     }
   }
 }

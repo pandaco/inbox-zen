@@ -2,18 +2,9 @@ export type MessageType =
   | 'AUTHENTICATE'
   | 'LOGOUT'
   | 'GET_AUTH_STATUS'
-  | 'GET_TOP_UNREAD_SENDERS'
-  | 'GET_TOP_HEAVIEST_EMAILS'
-  | 'GET_TOP_REPEATED_SUBJECTS'
-  | 'GET_EXPIRED_OTPS'
-  | 'GET_PARCEL_NOTIFICATIONS'
-  | 'GET_OLD_EMAILS'
-  | 'GET_PAST_INVITES'
-  | 'GET_REDUNDANT_THREADS'
-  | 'GET_OLDEST_EMAILS'
   | 'GET_GLOBAL_STATS'
-  | 'DELETE_EMAILS_BY_QUERY'
-  | 'DELETE_MESSAGE';
+  | 'TRASH_MESSAGES'
+  | 'UNTRASH_MESSAGES';
 
 export interface GlobalStats {
   unreadSenders: StatsResult<SenderStat>;
@@ -30,6 +21,8 @@ export interface GlobalStats {
 export interface SubjectStat {
   subject: string;
   count: number;
+  /** Underlying message ids — used for precise trash actions. */
+  ids?: string[];
 }
 
 export interface QuickFilter {
@@ -54,6 +47,22 @@ export interface SenderStat {
   count: number;
   unsubscribeUrl?: string;
   score?: number;
+  /** Underlying message ids — used for precise trash actions. */
+  ids?: string[];
+}
+
+export interface TrashResult {
+  /** Ids actually moved to (or out of) trash — undo operates on exactly these. */
+  trashedIds: string[];
+  /** Number of ids that failed (a failed chunk stops the operation). */
+  failedCount: number;
+  /**
+   * Exact, freshly rebuilt stats — present once a corpus exists. The UI
+   * prefers this over surgically pruning its local copy; it's undefined
+   * before the first full sync, when the caller should fall back to
+   * client-side pruning.
+   */
+  stats?: GlobalStats;
 }
 
 export interface SizeStat {

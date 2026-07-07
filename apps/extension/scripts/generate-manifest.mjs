@@ -23,7 +23,10 @@ const manifest = {
   ...(extensionKey && { key: extensionKey }),
   description: '__MSG_appDesc__',
   default_locale: 'en',
-  permissions: ['storage', 'identity'],
+  // unlimitedStorage: the message corpus (parsed headers, cached to make
+  // re-syncs incremental) can grow past the 10MB default quota on large
+  // mailboxes. No install-time warning is shown for this permission.
+  permissions: ['storage', 'identity', 'unlimitedStorage'],
   host_permissions: [
     'https://mail.google.com/*',
     'https://www.googleapis.com/*',

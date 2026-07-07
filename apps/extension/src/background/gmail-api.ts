@@ -1,9 +1,10 @@
-import type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats } from '../shared/types';
-import { parseBatchResponse } from './gmail-parse';
-import type { MessageMetadata } from './gmail-parse';
-import { StatsAccumulator } from './stats-accumulator';
+import type { GlobalStats } from '../shared/types';
+import { parseBatchResponse, parseMessage } from './gmail-parse';
+import type { ParsedMessage } from './gmail-parse';
+import { applyDelta, membershipUnion, rebuildStats } from './corpus';
+import type { Corpus, MembershipSets } from './corpus';
 
-export type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats };
+export type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats } from '../shared/types';
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const BATCH_API = 'https://www.googleapis.com/batch/gmail/v1';
@@ -68,7 +69,7 @@ async function fetchMetadataBatch(
   token: string,
   ids: string[],
   metadataHeaders: string[],
-): Promise<MessageMetadata[]> {
+): Promise<ParsedMessage[]> {
   const boundary = `batch_${Math.random().toString(36).slice(2)}`;
   const fields = 'id,threadId,sizeEstimate,snippet,payload(headers)';
 
@@ -105,7 +106,8 @@ async function fetchMetadataBatch(
     }
     throw new Error(`Batch request failed: ${res.status}`);
   }
-  return parseBatchResponse(await res.text(), res.headers.get('Content-Type') || '');
+  const raw = parseBatchResponse(await res.text(), res.headers.get('Content-Type') || '');
+  return raw.filter(m => !!m.id).map(parseMessage);
 }
 
 export type ProgressCallback = (
@@ -115,7 +117,7 @@ export type ProgressCallback = (
 ) => void;
 
 interface FetchCallbacks {
-  onBatch: (messages: MessageMetadata[]) => void;
+  onBatch: (parsed: ParsedMessage[]) => void;
   onProgress?: (fetched: number, total: number, errorCount: number) => void;
 }
 
@@ -185,58 +187,109 @@ async function fetchAllMetadata(
   return { errorCount };
 }
 
+export interface GetStatsOptions {
+  /** Cached corpus from a previous sync — pass {} (or omit) for a full sync. */
+  corpus?: Corpus;
+  /** Ids to exclude from this sync's universe (e.g. just-trashed messages). */
+  excludeIds?: Set<string>;
+  onProgress?: ProgressCallback;
+}
+
+export interface SyncResult {
+  stats: GlobalStats;
+  corpus: Corpus;
+}
+
+/**
+ * Sync the mailbox. Re-runs the 4 cheap ID list queries to get fresh
+ * membership sets, diffs them against the cached corpus, and only fetches
+ * metadata for messages the corpus doesn't already have. A full sync is
+ * simply a delta sync against an empty corpus — same code path.
+ */
 export async function getGlobalStats(
   token: string,
-  onProgress?: ProgressCallback,
-): Promise<GlobalStats> {
+  { corpus = {}, excludeIds, onProgress }: GetStatsOptions = {},
+): Promise<SyncResult> {
   const [unreadIds, heavyIds, oldIds, inviteIds] = await Promise.all([
     listAllMessageIds(token, 'in:inbox is:unread'),
     listAllMessageIds(token, 'in:inbox (has:attachment OR larger:100kb)'),
     listAllMessageIds(token, 'in:inbox older_than:1y'),
-    listAllMessageIds(token, 'in:inbox (filename:invite.ics OR "google calendar")')
+    listAllMessageIds(token, 'in:inbox (filename:invite.ics OR "google calendar")'),
   ]);
 
-  const unreadSet = new Set(unreadIds);
-  const heavySet = new Set(heavyIds);
-  const oldSet = new Set(oldIds);
-  const inviteSet = new Set(inviteIds);
-  const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds, ...inviteIds]));
+  const drop = (ids: string[]): string[] =>
+    excludeIds?.size ? ids.filter(id => !excludeIds.has(id)) : ids;
 
-  const acc = new StatsAccumulator(unreadSet, heavySet, oldSet, inviteSet);
+  const sets: MembershipSets = {
+    unread: new Set(drop(unreadIds)),
+    heavy: new Set(drop(heavyIds)),
+    old: new Set(drop(oldIds)),
+    invite: new Set(drop(inviteIds)),
+  };
+  const freshUnion = membershipUnion(sets);
 
+  const toFetch = [...freshUnion].filter(id => !(id in corpus));
+
+  const fetchedSoFar: ParsedMessage[] = [];
   const { errorCount } = await fetchAllMetadata(
     token,
-    allIds,
+    toFetch,
     ['From', 'Subject', 'Date', 'List-Unsubscribe'],
     {
-      onBatch: messages => acc.add(messages),
+      onBatch: parsed => fetchedSoFar.push(...parsed),
       onProgress: onProgress
-        ? (fetched, total, errors) => onProgress(fetched, total, acc.snapshot(fetched, errors))
+        ? (fetched, total, errors) => {
+            const partialCorpus = applyDelta(corpus, fetchedSoFar, sets);
+            onProgress(fetched, total, rebuildStats(partialCorpus, freshUnion.size, errors));
+          }
         : undefined,
     },
   );
 
-  return acc.snapshot(allIds.length, errorCount);
+  const finalCorpus = applyDelta(corpus, fetchedSoFar, sets);
+  const stats = rebuildStats(finalCorpus, freshUnion.size, errorCount);
+  return { stats, corpus: finalCorpus };
 }
 
-export async function deleteEmailsByQuery(token: string, query: string): Promise<{ success: boolean; count: number }> {
-  const ids = await listAllMessageIds(token, query);
-  if (ids.length === 0) return { success: true, count: 0 };
-  for (let i = 0; i < ids.length; i += 1000) {
-    const res = await fetch(`${GMAIL_API}/messages/batchDelete`, {
+export interface TrashResult {
+  trashedIds: string[];
+  failedCount: number;
+}
+
+// batchModify accepts at most 1000 ids per call.
+const MODIFY_CHUNK = 1000;
+
+async function batchModifyLabels(
+  token: string,
+  ids: string[],
+  labels: { addLabelIds?: string[]; removeLabelIds?: string[] },
+): Promise<TrashResult> {
+  const doneIds: string[] = [];
+  for (let i = 0; i < ids.length; i += MODIFY_CHUNK) {
+    const chunk = ids.slice(i, i + MODIFY_CHUNK);
+    const res = await fetch(`${GMAIL_API}/messages/batchModify`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: ids.slice(i, i + 1000) }),
+      body: JSON.stringify({ ids: chunk, ...labels }),
     });
-    if (!res.ok) throw new Error(`Batch delete failed: ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 401) throw new Error(`Batch modify failed: 401`);
+      // Report what succeeded so far; the caller's undo operates on exactly these.
+      return { trashedIds: doneIds, failedCount: ids.length - doneIds.length };
+    }
+    doneIds.push(...chunk);
   }
-  return { success: true, count: ids.length };
+  return { trashedIds: doneIds, failedCount: 0 };
 }
 
-export async function deleteMessage(token: string, id: string): Promise<boolean> {
-  const res = await fetch(`${GMAIL_API}/messages/${id}/trash`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  return res.ok;
+/** Move messages to trash (recoverable — Gmail purges trash after 30 days). */
+export async function trashMessages(token: string, ids: string[]): Promise<TrashResult> {
+  if (ids.length === 0) return { trashedIds: [], failedCount: 0 };
+  return batchModifyLabels(token, ids, { addLabelIds: ['TRASH'] });
+}
+
+/** Restore previously trashed messages (undo). */
+export async function untrashMessages(token: string, ids: string[]): Promise<TrashResult> {
+  if (ids.length === 0) return { trashedIds: [], failedCount: 0 };
+  return batchModifyLabels(token, ids, { removeLabelIds: ['TRASH'], addLabelIds: ['INBOX'] });
 }
