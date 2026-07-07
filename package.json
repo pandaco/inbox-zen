@@ -7,9 +7,9 @@
     "build": "nx build extension",
     "test": "nx test extension",
     "lint": "nx lint extension",
-    "release": "nx release",
+    "release": "nx release && node scripts/finalize-release.mjs",
     "release:dry": "nx release --dry-run",
-    "release:first": "nx release --first-release"
+    "release:first": "nx release --first-release && node scripts/finalize-release.mjs"
   },
   "private": true,
   "devDependencies": {
