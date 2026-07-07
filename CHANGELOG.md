@@ -1,3 +1,20 @@
+## 0.2.4 (2026-07-07)
+
+### 🚀 Features
+
+- unified watch mode for the extension dev loop ([b28560b](https://github.com/pandaco/inbox-zen/commit/b28560b))
+- add FR/EN i18n, dark mode, and split the stats UI ([6bbb263](https://github.com/pandaco/inbox-zen/commit/6bbb263))
+- recoverable trash+undo, delta sync, and a Quick Clean tab ([0852c00](https://github.com/pandaco/inbox-zen/commit/0852c00))
+- add K/T keyboard shortcuts to the Challenge tab ([959c00f](https://github.com/pandaco/inbox-zen/commit/959c00f))
+
+### 🩹 Fixes
+
+- harden OAuth token handling and upgrade to full Gmail scope ([eb5c6bd](https://github.com/pandaco/inbox-zen/commit/eb5c6bd))
+
+### 🔥 Performance
+
+- replace per-tick stats recompute with incremental accumulator ([88235e4](https://github.com/pandaco/inbox-zen/commit/88235e4))
+
 ## 0.2.3 (2026-07-06)
 
 ### 🚀 Features
