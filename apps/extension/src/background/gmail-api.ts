@@ -1,12 +1,23 @@
 import type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats } from '../shared/types';
+import { parseBatchResponse } from './gmail-parse';
+import type { MessageMetadata } from './gmail-parse';
+import { StatsAccumulator } from './stats-accumulator';
 
 export type { SenderStat, SizeStat, SubjectStat, StatsResult, GlobalStats };
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const BATCH_API = 'https://www.googleapis.com/batch/gmail/v1';
-const BATCH_SIZE = 40;       // Reduced batch size for better stability
-const BATCH_DELAY_MS = 2000; // Increased delay (1 batch every 2s per worker)
-const MAX_RETRIES = 10;      // More retries for large mailboxes
+
+// Quota math: messages.get (metadata) costs 5 units; the per-user limit is
+// 250 units/s. Two workers, each fetching BATCH_SIZE=40 messages then
+// sleeping BATCH_DELAY_MS=2s, yield ~40 msgs/s ≈ 200 units/s — inside the
+// limit with headroom. On rate-limit errors each worker backs off
+// adaptively (delay ×1.5 up to MAX_WORKER_DELAY_MS, decaying on success).
+const BATCH_SIZE = 40;
+const BATCH_DELAY_MS = 2000;
+const MAX_WORKER_DELAY_MS = 8000;
+const MAX_RETRIES = 6;
+const MAX_BACKOFF_MS = 30_000;
 
 async function fetchJson<T>(url: string, token: string): Promise<T> {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -17,26 +28,6 @@ async function fetchJson<T>(url: string, token: string): Promise<T> {
 interface MessageListResponse {
   messages?: { id: string }[];
   nextPageToken?: string;
-}
-
-interface MessageMetadata {
-  id: string;
-  threadId?: string;
-  sizeEstimate: number;
-  snippet?: string;
-  payload?: { headers?: { name: string; value: string }[] };
-}
-
-function getHeader(msg: MessageMetadata, name: string): string {
-  return (
-    msg.payload?.headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? ''
-  );
-}
-
-function parseSender(from: string): { name: string; email: string } {
-  const match = from.match(/^(.*?)\s*<([^>]+)>$/);
-  if (match) return { name: match[1].trim(), email: match[2].trim() };
-  return { name: from, email: from };
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -67,60 +58,10 @@ async function listAllMessageIds(token: string, query: string): Promise<string[]
   return ids;
 }
 
-function parseBatchResponse(text: string, contentType: string): MessageMetadata[] {
-  const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/);
-  if (!boundaryMatch) return [];
-  const boundary = boundaryMatch[1];
-
-  return text
-    .split(`--${boundary}`)
-    .slice(1, -1)
-    .flatMap(part => {
-      // Robust detection of all quota-related errors in the sub-response headers
-      const isRateLimited = 
-        part.includes('HTTP/1.1 429') || 
-        part.includes('HTTP/1.1 503') || 
-        (part.includes('HTTP/1.1 403') && (
-          part.includes('rateLimitExceeded') || 
-          part.includes('userRateLimitExceeded') || 
-          part.includes('quota')
-        ));
-
-      if (isRateLimited) {
-        throw new Error('Rate limited'); // Triggers retry in processWorker
-      }
-      
-      const jsonStart = part.indexOf('{');
-      const jsonEnd = part.lastIndexOf('}');
-      if (jsonStart === -1 || jsonEnd === -1) return [];
-
-      try {
-        const parsed = JSON.parse(part.slice(jsonStart, jsonEnd + 1)) as MessageMetadata & {
-          error?: { code?: number; message?: string };
-        };
-        
-        if (parsed.error) {
-          const code = parsed.error.code;
-          const msg = (parsed.error.message || '').toLowerCase();
-          const isRetryable = 
-            code === 429 || 
-            code === 503 || 
-            (code === 403 && (msg.includes('rate') || msg.includes('quota') || msg.includes('limit')));
-
-          if (isRetryable) throw new Error('Rate limited');
-          
-          // Non-retryable error (like 404 Message Not Found), we return empty to skip it
-          return [];
-        }
-
-        if (!parsed.id) return [];
-        return [parsed];
-      } catch (err) {
-        // Re-throw if it's the specific "Rate limited" signal
-        if (err instanceof Error && err.message === 'Rate limited') throw err;
-        return [];
-      }
-    });
+interface RateLimitError {
+  status: number;
+  message: string;
+  retryAfterMs?: number;
 }
 
 async function fetchMetadataBatch(
@@ -153,7 +94,15 @@ async function fetchMetadataBatch(
   });
 
   if (!res.ok) {
-    if (res.status === 429 || res.status === 503) throw { status: res.status, message: 'Rate limited' };
+    if (res.status === 429 || res.status === 503) {
+      const retryAfter = Number(res.headers.get('Retry-After'));
+      const err: RateLimitError = {
+        status: res.status,
+        message: 'Rate limited',
+        retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined,
+      };
+      throw err;
+    }
     throw new Error(`Batch request failed: ${res.status}`);
   }
   return parseBatchResponse(await res.text(), res.headers.get('Content-Type') || '');
@@ -163,33 +112,31 @@ export type ProgressCallback = (
   fetched: number,
   total: number,
   partialData?: GlobalStats,
-  currentMessages?: MessageMetadata[],
-  currentErrors?: number
 ) => void;
 
-/**
- * Optimized fetcher using two parallel workers to saturate the 250 units/s quota.
- * For 12,000 emails, this reduces the time to ~4 minutes (theoretical minimum).
- */
-async function fetchAllMetadataOptimized(
+interface FetchCallbacks {
+  onBatch: (messages: MessageMetadata[]) => void;
+  onProgress?: (fetched: number, total: number, errorCount: number) => void;
+}
+
+async function fetchAllMetadata(
   token: string,
   ids: string[],
   metadataHeaders: string[],
-  onProgress?: ProgressCallback,
-): Promise<{ messages: MessageMetadata[]; errorCount: number }> {
-  const messages: MessageMetadata[] = [];
+  { onBatch, onProgress }: FetchCallbacks,
+): Promise<{ errorCount: number }> {
+  let fetchedCount = 0;
   let errorCount = 0;
   let lastPartialSentAt = Date.now();
-  
-  // Split IDs into chunks of BATCH_SIZE
+
   const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += BATCH_SIZE) {
     chunks.push(ids.slice(i, i + BATCH_SIZE));
   }
 
-  // Worker that processes chunks with a delay to respect quota
-  // We use 2 workers in parallel, each taking 50% of the quota
-  const processWorker = async (workerChunks: string[][], workerDelay: number) => {
+  const processWorker = async (workerChunks: string[][]) => {
+    let delay = BATCH_DELAY_MS;
+
     for (const chunk of workerChunks) {
       let retries = 0;
       let success = false;
@@ -197,50 +144,45 @@ async function fetchAllMetadataOptimized(
       while (retries < MAX_RETRIES && !success) {
         try {
           const results = await fetchMetadataBatch(token, chunk, metadataHeaders);
-          messages.push(...results);
+          onBatch(results);
+          fetchedCount += results.length;
           errorCount += chunk.length - results.length;
           success = true;
-        } catch {
+          // Recover throughput after a rate-limit episode.
+          delay = Math.max(BATCH_DELAY_MS, delay / 1.5);
+        } catch (err) {
           retries++;
+          delay = Math.min(delay * 1.5, MAX_WORKER_DELAY_MS);
           if (retries < MAX_RETRIES) {
-            const waitTime = Math.pow(2, retries) * 1000 + (Math.random() * 500);
-            await sleep(waitTime);
+            const retryAfterMs = (err as RateLimitError)?.retryAfterMs;
+            const backoff = Math.min(Math.pow(2, retries) * 1000, MAX_BACKOFF_MS);
+            await sleep(retryAfterMs ?? backoff + Math.random() * 500);
           } else {
             errorCount += chunk.length;
           }
         }
       }
 
-      // Progress reporting logic (Shared by workers)
-      const batchCount = Math.floor(messages.length / BATCH_SIZE);
-      const isFirst = messages.length <= BATCH_SIZE;
-      const isLast = messages.length + errorCount >= ids.length;
+      const isFirst = fetchedCount <= BATCH_SIZE;
+      const isLast = fetchedCount + errorCount >= ids.length;
       const elapsed = Date.now() - lastPartialSentAt;
-      const shouldSendPartial = isFirst || isLast || (elapsed > 3000) || (batchCount % 10 === 0);
-      
-      if (onProgress && shouldSendPartial) {
-        onProgress(messages.length, ids.length, true, messages, errorCount);
+
+      if (onProgress && (isFirst || isLast || elapsed > 3000)) {
+        onProgress(fetchedCount, ids.length, errorCount);
         lastPartialSentAt = Date.now();
       }
 
-      await sleep(workerDelay);
+      await sleep(delay);
     }
   };
 
-  // Divide chunks between 2 workers
   const half = Math.ceil(chunks.length / 2);
-  const worker1Chunks = chunks.slice(0, half);
-  const worker2Chunks = chunks.slice(half);
-
-  // Each worker waits twice the normal delay to keep combined throughput at ~50 emails/s
-  const workerDelay = BATCH_DELAY_MS * 2;
-
   await Promise.all([
-    processWorker(worker1Chunks, workerDelay),
-    processWorker(worker2Chunks, workerDelay)
+    processWorker(chunks.slice(0, half)),
+    processWorker(chunks.slice(half)),
   ]);
 
-  return { messages, errorCount };
+  return { errorCount };
 }
 
 export async function getGlobalStats(
@@ -260,157 +202,21 @@ export async function getGlobalStats(
   const inviteSet = new Set(inviteIds);
   const allIds = Array.from(new Set([...unreadIds, ...heavyIds, ...oldIds, ...inviteIds]));
 
-  const calculateStats = (msgs: MessageMetadata[], fetchedCount: number, currentErrors: number): GlobalStats => {
-    const filter = (idSet: Set<string>): MessageMetadata[] => msgs.filter(m => idSet.has(m.id));
-    return {
-      unreadSenders: processUnreadSenders(filter(unreadSet), fetchedCount, currentErrors),
-      heaviestEmails: processHeaviest(filter(heavySet), fetchedCount, currentErrors),
-      repeatedSubjects: processRepeatedSubjects(msgs, fetchedCount, currentErrors),
-      expiredOTPs: processOTPs(msgs, fetchedCount, currentErrors),
-      parcelNotifications: processParcels(msgs, fetchedCount, currentErrors),
-      oldEmails: processOld(filter(oldSet), fetchedCount, currentErrors),
-      pastInvites: processInvites(filter(inviteSet), msgs, fetchedCount, currentErrors),
-      redundantThreads: processRedundant(msgs, fetchedCount, currentErrors),
-      oldestEmails: processOldest(msgs, fetchedCount, currentErrors),
-    };
-  };
+  const acc = new StatsAccumulator(unreadSet, heavySet, oldSet, inviteSet);
 
-  const { messages, errorCount } = await fetchAllMetadataOptimized(
-    token, 
-    allIds, 
-    ['From', 'Subject', 'Date', 'List-Unsubscribe'], 
-    (fetched, total, shouldCompute, currentMsgs, currentErrors) => {
-      if (onProgress) {
-        const partial = (shouldCompute && currentMsgs) ? calculateStats(currentMsgs, fetched, currentErrors || 0) : undefined;
-        onProgress(fetched, total, partial);
-      }
-    }
+  const { errorCount } = await fetchAllMetadata(
+    token,
+    allIds,
+    ['From', 'Subject', 'Date', 'List-Unsubscribe'],
+    {
+      onBatch: messages => acc.add(messages),
+      onProgress: onProgress
+        ? (fetched, total, errors) => onProgress(fetched, total, acc.snapshot(fetched, errors))
+        : undefined,
+    },
   );
 
-  return calculateStats(messages, allIds.length, errorCount);
-}
-
-// --- Processors ---
-
-function processUnreadSenders(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SenderStat> {
-  const now = Date.now();
-  const senderCounts = new Map<string, { name: string; count: number; unsubscribeUrl?: string; firstDate: number; lastDate: number }>();
-  for (const m of messages) {
-    const from = getHeader(m, 'From');
-    if (!from) continue;
-    const { name, email } = parseSender(from);
-    if (!email) continue;
-    const date = new Date(getHeader(m, 'Date') || now).getTime();
-    const unsub = getHeader(m, 'List-Unsubscribe');
-    const unsubUrl = unsub?.match(/<(https?:\/\/[^>]+)>/)?.[1];
-    const existing = senderCounts.get(email);
-    if (existing) {
-      existing.count++;
-      if (!existing.unsubscribeUrl) existing.unsubscribeUrl = unsubUrl;
-      existing.firstDate = Math.min(existing.firstDate, date);
-      existing.lastDate = Math.max(existing.lastDate, date);
-    } else {
-      senderCounts.set(email, { name, count: 1, unsubscribeUrl: unsubUrl, firstDate: date, lastDate: date });
-    }
-  }
-  const items = [...senderCounts.entries()]
-    .map(([email, s]) => {
-      const days = Math.max(1, (s.lastDate - s.firstDate) / 86400000);
-      const score = (s.count / days) * ( (now - s.lastDate) < 604800000 ? 2 : 1) * Math.log10(s.count + 1);
-      return { sender: s.name || email, email, count: s.count, unsubscribeUrl: s.unsubscribeUrl, score };
-    })
-    .sort((a, b) => b.count - a.count);
-  return { items, totalFetched, errorCount };
-}
-
-function processHeaviest(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SizeStat> {
-  const items = messages
-    .filter(m => !!m.id)
-    .map(m => ({ 
-      id: m.id,
-      subject: getHeader(m, 'Subject') || '(no subject)', 
-      from: getHeader(m, 'From') || '(unknown)', 
-      sizeEstimate: m.sizeEstimate || 0
-    }))
-    .sort((a, b) => b.sizeEstimate - a.sizeEstimate);
-  return { items, totalFetched, errorCount };
-}
-
-function processRepeatedSubjects(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const counts = new Map<string, number>();
-  for (const m of messages) {
-    const s = getHeader(m, 'Subject') || '(no subject)';
-    counts.set(s, (counts.get(s) || 0) + 1);
-  }
-  const items = [...counts.entries()].filter(([ , c]) => c > 2).map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
-  return { items, totalFetched, errorCount };
-}
-
-function processOTPs(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const otpPatterns = [/code/i, /otp/i, /verification/i, /votre mot de passe/i, /sécurité/i, /security/i];
-  const items = messages
-    .filter(m => {
-      const s = getHeader(m, 'Subject') || '';
-      const date = new Date(getHeader(m, 'Date')).getTime();
-      return otpPatterns.some(p => p.test(s)) && (Date.now() - date > 86400000);
-    })
-    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
-  return { items, totalFetched, errorCount };
-}
-
-function processParcels(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const parcelPatterns = [/colis/i, /livraison/i, /delivery/i, /shipping/i, /expédition/i, /command/i, /order/i, /envoyé/i];
-  const counts = new Map<string, number>();
-  for (const m of messages) {
-    const s = getHeader(m, 'Subject') || '';
-    if (parcelPatterns.some(p => p.test(s))) {
-      const generic = s.replace(/\S*\d\S*/g, '#').replace(/#+/g, '#').replace(/\s+/g, ' ').trim();
-      counts.set(generic, (counts.get(generic) || 0) + 1);
-    }
-  }
-  const items = [...counts.entries()].map(([subject, count]) => ({ subject, count })).sort((a, b) => b.count - a.count);
-  return { items, totalFetched, errorCount };
-}
-
-function processOld(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const items = messages.map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
-  return { items, totalFetched, errorCount };
-}
-
-function processInvites(inviteMsgs: MessageMetadata[], allMessages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const inviteRegex = /invite\.ics|google calendar/i;
-  const items = allMessages
-    .filter(m => {
-      const s = getHeader(m, 'Subject') || '';
-      const date = new Date(getHeader(m, 'Date')).getTime();
-      return (inviteRegex.test(s) || (inviteMsgs.some(im => im.id === m.id))) && (Date.now() - date > 86400000 * 7);
-    })
-    .map(m => ({ subject: getHeader(m, 'Subject'), count: 1 }));
-  return { items, totalFetched, errorCount };
-}
-
-function processRedundant(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SubjectStat> {
-  const threadCounts = new Map<string, { subject: string; count: number }>();
-  for (const m of messages) {
-    const tid = m.threadId || m.id;
-    const t = threadCounts.get(tid);
-    if (t) t.count++; else threadCounts.set(tid, { subject: getHeader(m, 'Subject'), count: 1 });
-  }
-  const items = [...threadCounts.values()].filter(t => t.count > 3).map(t => ({ subject: t.subject, count: t.count })).sort((a, b) => b.count - a.count);
-  return { items, totalFetched, errorCount };
-}
-
-function processOldest(messages: MessageMetadata[], totalFetched: number, errorCount: number): StatsResult<SizeStat> {
-  const items = messages
-    .map(m => ({ 
-      id: m.id, 
-      subject: getHeader(m, 'Subject') || '(no subject)', 
-      from: getHeader(m, 'From'), 
-      sizeEstimate: new Date(getHeader(m, 'Date')).getTime(),
-      snippet: m.snippet
-    }))
-    .sort((a, b) => a.sizeEstimate - b.sizeEstimate);
-  return { items, totalFetched, errorCount };
+  return acc.snapshot(allIds.length, errorCount);
 }
 
 export async function deleteEmailsByQuery(token: string, query: string): Promise<{ success: boolean; count: number }> {
