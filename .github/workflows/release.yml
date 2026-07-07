@@ -32,8 +32,17 @@ jobs:
       - name: Test extension
         run: npx nx test extension
 
+      - name: Ensure OAuth client id is configured
+        run: |
+          if [ -z "${{ secrets.GMAIL_CLIENT_ID }}" ]; then
+            echo "::error::GMAIL_CLIENT_ID secret is not set — the released zip would have no oauth2 config and auth would not work."
+            exit 1
+          fi
+
       - name: Build extension
         run: npx nx build extension
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
 
       - name: Package extension
         run: |
