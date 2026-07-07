@@ -41,7 +41,7 @@
     "@angular/cli": "^22.0.5",
     "@angular/compiler-cli": "^22.0.5",
     "@eslint/js": "^10.0.1",
-    "@types/chrome": "^0.1.39",
+    "@types/chrome": "^0.2.2",
     "angular-eslint": "22.0.0",
     "concurrently": "9.2.1",
     "dotenv": "^16.4.7",
