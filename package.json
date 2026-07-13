@@ -19,7 +19,7 @@
     "@nx/eslint-plugin": "23.0.1",
     "@nx/js": "23.0.1",
     "@typescript-eslint/utils": "^8.40.0",
-    "angular-eslint": "^21.0.1",
+    "angular-eslint": "^22.1.0",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.0.0",
     "nx": "23.0.1",
