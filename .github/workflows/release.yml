@@ -50,7 +50,7 @@ jobs:
           zip -r ../../../inbox-zen-extension-${{ github.ref_name }}.zip .
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: inbox-zen-extension-${{ github.ref_name }}.zip
           generate_release_notes: true
